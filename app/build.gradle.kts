@@ -1,3 +1,10 @@
+import java.util.Properties
+
+// Release signing details live in keystore.properties, which is not committed.
+// Without that file the release build is left unsigned.
+val keystoreFile = rootProject.file("keystore.properties")
+val keystore = Properties().apply { if (keystoreFile.exists()) keystoreFile.inputStream().use { load(it) } }
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
@@ -15,8 +22,20 @@ android {
     versionName = "1.0"
   }
 
+  signingConfigs {
+    if (keystoreFile.exists()) {
+      create("release") {
+        storeFile = file(keystore.getProperty("storeFile"))
+        storePassword = keystore.getProperty("storePassword")
+        keyAlias = keystore.getProperty("keyAlias")
+        keyPassword = keystore.getProperty("keyPassword")
+      }
+    }
+  }
+
   buildTypes {
     release {
+      signingConfig = signingConfigs.findByName("release")
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
