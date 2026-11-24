@@ -8,7 +8,10 @@ import dev.local.androidreader.source.CatalogEntry
 import dev.local.androidreader.source.CatalogPage
 import dev.local.androidreader.source.ComicSource
 import dev.local.androidreader.source.KomgaConfig
+import dev.local.androidreader.source.KomgaSource
 import dev.local.androidreader.source.OpdsConfig
+import dev.local.androidreader.source.OpdsSource
+import dev.local.androidreader.source.ServerCheck
 import dev.local.androidreader.source.RemoteFile
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +36,8 @@ data class BrowseUiState(
   val canGoUp: Boolean = false,
   val detail: EntryDetail? = null,
   val message: String? = null,
+  /** Result of trying the server being added; null before a test and after any edit. */
+  val serverCheck: ServerCheck? = null,
   /** Sign-in headers the selected source needs for its thumbnails. */
   val thumbnailHeaders: Map<String, String> = emptyMap(),
 )
@@ -131,6 +136,28 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
   }
 
   fun messageShown() = _state.update { it.copy(message = null) }
+
+  private var checkJob: Job? = null
+
+  fun testOpds(config: OpdsConfig) = test(OpdsSource(app.httpClient, config), "an OPDS catalogue")
+
+  fun testKomga(config: KomgaConfig) = test(KomgaSource(app.httpClient, config), "a Komga server")
+
+  private fun test(source: ComicSource, kind: String) {
+    checkJob?.cancel()
+    _state.update { it.copy(serverCheck = ServerCheck.Running) }
+    checkJob =
+      viewModelScope.launch {
+        val result = ServerCheck.run(source, kind)
+        _state.update { it.copy(serverCheck = result) }
+      }
+  }
+
+  /** Called when the details change or the dialog closes: an old result no longer applies. */
+  fun clearServerCheck() {
+    checkJob?.cancel()
+    _state.update { if (it.serverCheck == null) it else it.copy(serverCheck = null) }
+  }
 
   fun addOpds(config: OpdsConfig) {
     app.library.saveOpds(config)

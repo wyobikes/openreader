@@ -115,7 +115,9 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
     }
 
     fun parseLibraries(body: String, sourceId: String): CatalogPage {
-      val libraries = json.parseToJsonElement(body) as? JsonArray ?: return CatalogPage(emptyList())
+      val libraries =
+        runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonArray
+          ?: throw WrongServerException("The address did not return a Komga library list")
       return CatalogPage(
         libraries.mapNotNull { element ->
           val o = element as? JsonObject ?: return@mapNotNull null
