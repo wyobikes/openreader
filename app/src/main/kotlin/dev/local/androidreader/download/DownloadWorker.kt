@@ -17,6 +17,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import dev.local.androidreader.ReaderApp
+import dev.local.androidreader.epub.PdfToEpub
 import dev.local.androidreader.library.Importer
 import dev.local.androidreader.source.OpdsSource
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,8 @@ data class DownloadItem(
   val bytesDone: Long = 0,
   val bytesTotal: Long = 0,
   val error: String? = null,
+  /** Extra detail for a finished download, such as the outcome of a conversion. */
+  val note: String? = null,
 ) {
   enum class Status {
     QUEUED,
@@ -104,6 +107,7 @@ class DownloadQueue(context: Context) {
       bytesDone = info.progress.getLong(KEY_DONE, 0),
       bytesTotal = info.progress.getLong(KEY_TOTAL, 0),
       error = info.outputData.getString(KEY_ERROR),
+      note = info.outputData.getString(KEY_NOTE),
     )
   }
 
@@ -118,6 +122,7 @@ class DownloadQueue(context: Context) {
     const val KEY_DONE = "done"
     const val KEY_TOTAL = "total"
     const val KEY_ERROR = "error"
+    const val KEY_NOTE = "note"
   }
 }
 
@@ -143,6 +148,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
     // A stable temp name per URL lets a retried job resume the same partial file.
     val temp = File(File(applicationContext.cacheDir, "downloads").apply { mkdirs() }, sha1(url))
     var downloaded = false
+    var note: String? = null
     return try {
       withContext(Dispatchers.IO) {
         var lastNotified = 0L
@@ -161,10 +167,25 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             ?: result.suggestedName
             ?: Downloader.fileNameFromUrl(url)
             ?: OpdsSource.safeName(title)
-        Importer.import(result.file, app.library.dir, name)
+        val added = Importer.import(result.file, app.library.dir, name)
+        // Optional: give each downloaded PDF an EPUB copy made from its text. The PDF is kept,
+        // and a PDF that cannot be converted (a scan, say) is not treated as a failed download.
+        if (app.library.convertPdfToEpub.value) {
+          for (pdf in added.filter { it.extension.equals("pdf", ignoreCase = true) }) {
+            note =
+              try {
+                PdfToEpub.convert(applicationContext, pdf, app.library.dir)
+                "Added to library with an EPUB copy"
+              } catch (e: CancellationException) {
+                throw e
+              } catch (e: Exception) {
+                "Added as PDF only: ${e.message ?: "could not convert"}"
+              }
+          }
+        }
         app.library.refresh()
       }
-      Result.success()
+      Result.success(workDataOf(DownloadQueue.KEY_NOTE to note))
     } catch (e: CancellationException) {
       throw e
     } catch (e: IOException) {

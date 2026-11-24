@@ -76,8 +76,9 @@ class SourceTest {
     assertFalse(book.isFolder)
     assertEquals("A. Writer", book.subtitle)
     assertEquals("https://srv.example/img/1.jpg", book.thumbnailUrl)
-    assertEquals(1, book.files.size)
-    assertEquals("Issue One Two.cbz", book.files[0].name)
+    // The comic archive and the EPUB edition are both offered.
+    assertEquals(listOf("Issue One Two.cbz", "Issue One Two.epub"), book.files.map { it.name })
+    assertEquals(ComicFormat.EPUB, book.files[1].format)
     assertEquals("https://srv.example/books/1/file", book.files[0].url)
     assertEquals(1234L, book.files[0].sizeBytes)
   }

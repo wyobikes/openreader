@@ -186,7 +186,7 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
           val bookId = o["id"].text() ?: return@mapNotNull null
           val path = o["url"].text().orEmpty()
           val media = o["media"] as? JsonObject
-          // Books the app cannot read (EPUB, for instance) are left out.
+          // Books in a format the app cannot read are left out.
           val format =
             ComicFormat.fromName(path.substringAfterLast('/'))
               ?: ComicFormat.fromMimeType(media?.get("mediaType").text().orEmpty())
@@ -203,7 +203,8 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
             title = listOfNotNull(metadata?.get("number").text()?.let { "#$it" }, title).joinToString(" · "),
             subtitle = listOfNotNull(o["seriesTitle"].text(), pages?.let { "$it pages" }).joinToString(" · ").ifEmpty { null },
             thumbnailUrl = "$base/api/v1/books/$bookId/thumbnail",
-            onlineBookId = bookId,
+            // Page-by-page reading is for books made of images; an EPUB has to be downloaded.
+            onlineBookId = bookId.takeIf { format != ComicFormat.EPUB },
             files = listOf(RemoteFile(fileName, "$base/api/v1/books/$bookId/file", format, o["sizeBytes"].text()?.toLongOrNull())),
           )
         }

@@ -43,13 +43,14 @@ fun LibraryContent(
   onOpen: (Comic) -> Unit,
   onDelete: (Comic) -> Unit,
   modifier: Modifier = Modifier,
+  onConvertToEpub: (Comic) -> Unit = {},
 ) {
   var pendingDelete by remember { mutableStateOf<Comic?>(null) }
 
   if (comics.isEmpty()) {
     Box(modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
       Text(
-        "No comics yet.\nFind some in Browse, paste a link in Downloads, or tap + to import files from this device.",
+        "Nothing here yet.\nFind comics and books in Catalogues, paste a link in Downloads, or tap + to import files from this device.",
         textAlign = TextAlign.Center,
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -90,6 +91,7 @@ fun LibraryContent(
           Text(
             when {
               comic.isFinished -> "Read"
+              comic.isStarted && comic.isBook -> "Section ${comic.state.lastPage + 1} of ${comic.state.pageCount}"
               comic.isStarted -> "Page ${comic.state.lastPage + 1} of ${comic.state.pageCount}"
               else -> "Unread"
             },
@@ -101,22 +103,41 @@ fun LibraryContent(
     }
   }
 
+  // Long press: what can be done with this item.
   pendingDelete?.let { comic ->
+    val isPdf = comic.file.extension.equals("pdf", ignoreCase = true)
     AlertDialog(
       onDismissRequest = { pendingDelete = null },
-      title = { Text("Delete comic?") },
-      text = { Text("\"${comic.title}\" will be removed from this device.") },
-      confirmButton = {
-        TextButton(
-          onClick = {
-            onDelete(comic)
-            pendingDelete = null
+      title = { Text(comic.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+      text = {
+        Column {
+          if (isPdf) {
+            TextButton(
+              onClick = {
+                onConvertToEpub(comic)
+                pendingDelete = null
+              }
+            ) {
+              Text("Make an EPUB copy")
+            }
+            Text(
+              "Text only: pictures and page layout are not carried over. The PDF is kept.",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
+            )
           }
-        ) {
-          Text("Delete")
+          TextButton(
+            onClick = {
+              onDelete(comic)
+              pendingDelete = null
+            }
+          ) {
+            Text("Delete from this device", color = MaterialTheme.colorScheme.error)
+          }
         }
       },
-      dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
+      confirmButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
     )
   }
 }
