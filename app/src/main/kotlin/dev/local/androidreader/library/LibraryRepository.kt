@@ -1,6 +1,5 @@
 package dev.local.androidreader.library
 
-import dev.local.androidreader.source.CalibreConfig
 import dev.local.androidreader.source.KomgaConfig
 import dev.local.androidreader.source.OpdsConfig
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,7 +47,6 @@ private data class Saved(
   val comics: Map<String, ComicState> = emptyMap(),
   val opds: List<OpdsConfig> = emptyList(),
   val komga: List<KomgaConfig> = emptyList(),
-  val calibre: List<CalibreConfig> = emptyList(),
   val theme: ThemeMode = ThemeMode.SYSTEM,
   val convertPdfToEpub: Boolean = false,
   val bookTextZoom: Int = 100,
@@ -91,21 +89,6 @@ class LibraryRepository(val dir: File, private val stateFile: File) {
 
   @Synchronized
   fun setBookTextZoom(percent: Int) = persist(saved.copy(bookTextZoom = percent.coerceIn(60, 250)))
-
-  private val _calibre = MutableStateFlow(saved.calibre)
-  val calibreServers: StateFlow<List<CalibreConfig>> = _calibre.asStateFlow()
-
-  @Synchronized
-  fun saveCalibre(config: CalibreConfig) {
-    persist(saved.copy(calibre = saved.calibre.filter { it.url != config.url } + config))
-    _calibre.value = saved.calibre
-  }
-
-  @Synchronized
-  fun removeCalibre(config: CalibreConfig) {
-    persist(saved.copy(calibre = saved.calibre.filter { it.url != config.url }))
-    _calibre.value = saved.calibre
-  }
 
   private val _komga = MutableStateFlow(saved.komga)
   val komgaServers: StateFlow<List<KomgaConfig>> = _komga.asStateFlow()
