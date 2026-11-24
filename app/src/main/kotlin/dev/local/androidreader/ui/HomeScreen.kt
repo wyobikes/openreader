@@ -158,6 +158,9 @@ fun HomeScreen(onOpenComic: (Comic) -> Unit, browseViewModel: BrowseViewModel = 
           onDismissDetail = browseViewModel::dismissDetail,
           onAddOpds = browseViewModel::addOpds,
           onAddKomga = browseViewModel::addKomga,
+          onTestOpds = browseViewModel::testOpds,
+          onTestKomga = browseViewModel::testKomga,
+          onClearServerCheck = browseViewModel::clearServerCheck,
           onRemoveCatalog = browseViewModel::removeSelectedCatalog,
           modifier = modifier,
         )

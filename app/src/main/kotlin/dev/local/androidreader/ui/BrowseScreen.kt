@@ -31,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,6 +55,8 @@ import dev.local.androidreader.source.ComicFormat
 import dev.local.androidreader.source.KomgaConfig
 import dev.local.androidreader.source.OpdsConfig
 import dev.local.androidreader.source.RemoteFile
+import dev.local.androidreader.source.ServerCheck
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import dev.local.androidreader.ui.theme.ReaderTheme
 
 @Composable
@@ -68,6 +71,9 @@ fun BrowseContent(
   onDismissDetail: () -> Unit,
   onAddOpds: (OpdsConfig) -> Unit,
   onAddKomga: (KomgaConfig) -> Unit,
+  onTestOpds: (OpdsConfig) -> Unit,
+  onTestKomga: (KomgaConfig) -> Unit,
+  onClearServerCheck: () -> Unit,
   onRemoveCatalog: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -169,21 +175,42 @@ fun BrowseContent(
 
   if (showAddCatalog) {
     AddCatalogDialog(
-      onDismiss = { showAddCatalog = false },
+      check = state.serverCheck,
+      onDismiss = {
+        showAddCatalog = false
+        onClearServerCheck()
+      },
+      onTestOpds = onTestOpds,
+      onTestKomga = onTestKomga,
+      onEdited = onClearServerCheck,
       onAddOpds = {
         showAddCatalog = false
+        onClearServerCheck()
         onAddOpds(it)
       },
       onAddKomga = {
         showAddCatalog = false
+        onClearServerCheck()
         onAddKomga(it)
       },
     )
   }
 }
 
+/**
+ * Collects a server's details. The server must pass a connection test before it can be added,
+ * and changing any detail afterwards asks for the test again.
+ */
 @Composable
-private fun AddCatalogDialog(onDismiss: () -> Unit, onAddOpds: (OpdsConfig) -> Unit, onAddKomga: (KomgaConfig) -> Unit) {
+internal fun AddCatalogDialog(
+  check: ServerCheck?,
+  onDismiss: () -> Unit,
+  onTestOpds: (OpdsConfig) -> Unit,
+  onTestKomga: (KomgaConfig) -> Unit,
+  onEdited: () -> Unit,
+  onAddOpds: (OpdsConfig) -> Unit,
+  onAddKomga: (KomgaConfig) -> Unit,
+) {
   var komga by rememberSaveable { mutableStateOf(true) }
   var name by rememberSaveable { mutableStateOf("") }
   var url by rememberSaveable { mutableStateOf("") }
@@ -191,7 +218,10 @@ private fun AddCatalogDialog(onDismiss: () -> Unit, onAddOpds: (OpdsConfig) -> U
   var password by rememberSaveable { mutableStateOf("") }
   var apiKey by rememberSaveable { mutableStateOf("") }
   val trimmedUrl = url.trim()
-  val valid = trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")
+  val validUrl = (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) && trimmedUrl.toHttpUrlOrNull() != null
+  val label = name.trim().ifEmpty { trimmedUrl.substringAfter("://").substringBefore('/') }
+  val komgaConfig = KomgaConfig(label, trimmedUrl.trimEnd('/'), username.trim(), password, apiKey.trim())
+  val opdsConfig = OpdsConfig(label, trimmedUrl, username.trim(), password)
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -199,22 +229,51 @@ private fun AddCatalogDialog(onDismiss: () -> Unit, onAddOpds: (OpdsConfig) -> U
     text = {
       Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          FilterChip(selected = komga, onClick = { komga = true }, label = { Text("Komga") })
-          FilterChip(selected = !komga, onClick = { komga = false }, label = { Text("OPDS") })
+          FilterChip(
+            selected = komga,
+            onClick = {
+              komga = true
+              onEdited()
+            },
+            label = { Text("Komga") },
+          )
+          FilterChip(
+            selected = !komga,
+            onClick = {
+              komga = false
+              onEdited()
+            },
+            label = { Text("OPDS") },
+          )
         }
+        // The name is only a label, so changing it does not invalidate a passed test.
         OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
         OutlinedTextField(
           url,
-          { url = it },
+          {
+            url = it
+            onEdited()
+          },
           label = { Text(if (komga) "Server address" else "Catalogue URL") },
           placeholder = { Text(if (komga) "http://192.168.1.10:25600" else "https://server/opds/v1.2/catalog") },
           singleLine = true,
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
-        OutlinedTextField(username, { username = it }, label = { Text(if (komga) "Email" else "Username (optional)") }, singleLine = true)
+        OutlinedTextField(
+          username,
+          {
+            username = it
+            onEdited()
+          },
+          label = { Text(if (komga) "Email" else "Username (optional)") },
+          singleLine = true,
+        )
         OutlinedTextField(
           password,
-          { password = it },
+          {
+            password = it
+            onEdited()
+          },
           label = { Text(if (komga) "Password" else "Password (optional)") },
           singleLine = true,
           visualTransformation = PasswordVisualTransformation(),
@@ -223,23 +282,43 @@ private fun AddCatalogDialog(onDismiss: () -> Unit, onAddOpds: (OpdsConfig) -> U
         if (komga) {
           OutlinedTextField(
             apiKey,
-            { apiKey = it },
+            {
+              apiKey = it
+              onEdited()
+            },
             label = { Text("API key (instead of email and password)") },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
           )
         }
+
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+          OutlinedButton(
+            enabled = validUrl && check != ServerCheck.Running,
+            onClick = { if (komga) onTestKomga(komgaConfig) else onTestOpds(opdsConfig) },
+          ) {
+            Text("Test connection")
+          }
+          if (check == ServerCheck.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
+        when (check) {
+          is ServerCheck.Passed -> Text(check.message, color = MaterialTheme.colorScheme.primary)
+          is ServerCheck.Failed -> Text(check.message, color = MaterialTheme.colorScheme.error)
+          ServerCheck.Running -> Text("Trying the server…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+          null ->
+            Text(
+              if (validUrl) "Test the connection before adding." else "Enter an address starting with http:// or https://",
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+        }
       }
     },
     confirmButton = {
       TextButton(
-        enabled = valid,
-        onClick = {
-          val label = name.trim().ifEmpty { trimmedUrl.substringAfter("://").substringBefore('/') }
-          if (komga) onAddKomga(KomgaConfig(label, trimmedUrl.trimEnd('/'), username.trim(), password, apiKey.trim()))
-          else onAddOpds(OpdsConfig(label, trimmedUrl, username.trim(), password))
-        },
+        enabled = check is ServerCheck.Passed,
+        onClick = { if (komga) onAddKomga(komgaConfig) else onAddOpds(opdsConfig) },
       ) {
         Text("Add")
       }
@@ -263,7 +342,7 @@ fun BrowseContentPreview() {
         sources = listOf(SourceInfo("ia", "Internet Archive", false), SourceInfo("opds:x", "Home server", true)),
         entries = entries,
       ),
-      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {},
+      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {},
     )
   }
 }
@@ -286,7 +365,15 @@ fun BrowseDetailPreview() {
             ),
           ),
       ),
-      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {},
+      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {},
     )
+  }
+}
+
+@Preview(showBackground = true, widthDp = 380, heightDp = 720)
+@Composable
+fun AddServerFailedPreview() {
+  ReaderTheme {
+    AddCatalogDialog(ServerCheck.Failed("The server refused the sign-in details."), {}, {}, {}, {}, {}, {})
   }
 }

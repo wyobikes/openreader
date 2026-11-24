@@ -69,7 +69,9 @@ class OpdsSource(private val client: OkHttpClient, private val config: OpdsConfi
     private const val IMAGE = "http://opds-spec.org/image"
 
     fun parseFeed(xml: String, feedUrl: String, sourceId: String): Feed {
-      val root = parseXml(xml)
+      val root =
+        runCatching { parseXml(xml) }.getOrElse { throw WrongServerException("The address did not return an OPDS feed") }
+      if ((root.localName ?: root.tagName) != "feed") throw WrongServerException("The address did not return an OPDS feed")
       val feedLinks = root.childElements("link")
       val next = feedLinks.firstOrNull { it.getAttribute("rel") == "next" }?.href(feedUrl)
       val search = feedLinks.firstOrNull { it.getAttribute("rel") == "search" }?.href(feedUrl)
