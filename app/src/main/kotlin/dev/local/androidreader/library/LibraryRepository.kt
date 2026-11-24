@@ -29,11 +29,19 @@ data class Comic(val file: File, val state: ComicState) {
     get() = state.lastOpened > 0
 }
 
+/** Which colours the app uses. */
+enum class ThemeMode(val label: String) {
+  SYSTEM("Follow system"),
+  LIGHT("Light"),
+  DARK("Dark"),
+}
+
 @Serializable
 private data class Saved(
   val comics: Map<String, ComicState> = emptyMap(),
   val opds: List<OpdsConfig> = emptyList(),
   val komga: List<KomgaConfig> = emptyList(),
+  val theme: ThemeMode = ThemeMode.SYSTEM,
 )
 
 /** The comics folder plus a small JSON file holding reading positions and catalogue settings. */
@@ -46,6 +54,15 @@ class LibraryRepository(val dir: File, private val stateFile: File) {
 
   private val _opds = MutableStateFlow(saved.opds)
   val opdsCatalogs: StateFlow<List<OpdsConfig>> = _opds.asStateFlow()
+
+  private val _theme = MutableStateFlow(saved.theme)
+  val themeMode: StateFlow<ThemeMode> = _theme.asStateFlow()
+
+  @Synchronized
+  fun setTheme(mode: ThemeMode) {
+    persist(saved.copy(theme = mode))
+    _theme.value = mode
+  }
 
   private val _komga = MutableStateFlow(saved.komga)
   val komgaServers: StateFlow<List<KomgaConfig>> = _komga.asStateFlow()
@@ -80,14 +97,19 @@ class LibraryRepository(val dir: File, private val stateFile: File) {
         .sortedWith(compareBy(NaturalOrder) { it.title })
   }
 
+  fun updateState(file: File, transform: (ComicState) -> ComicState) = updateState(file.name, transform)
+
+  /** [key] is a library file's name, or an identifier for a book read straight from a server. */
   @Synchronized
-  fun updateState(file: File, transform: (ComicState) -> ComicState) {
-    val next = transform(saved.comics[file.name] ?: ComicState())
-    persist(saved.copy(comics = saved.comics + (file.name to next)))
-    _comics.update { list -> list.map { if (it.file == file) it.copy(state = next) else it } }
+  fun updateState(key: String, transform: (ComicState) -> ComicState) {
+    val next = transform(saved.comics[key] ?: ComicState())
+    persist(saved.copy(comics = saved.comics + (key to next)))
+    _comics.update { list -> list.map { if (it.file.name == key) it.copy(state = next) else it } }
   }
 
-  fun state(file: File): ComicState = saved.comics[file.name] ?: ComicState()
+  fun state(file: File): ComicState = state(file.name)
+
+  fun state(key: String): ComicState = saved.comics[key] ?: ComicState()
 
   @Synchronized
   fun delete(file: File) {

@@ -81,11 +81,15 @@ import androidx.core.view.WindowInsetsControllerCompat
 import dev.local.androidreader.ReaderApp
 import dev.local.androidreader.reader.PageSource
 import dev.local.androidreader.reader.ZoomMath
+import dev.local.androidreader.source.KomgaSource
+import dev.local.androidreader.source.ServerCheck
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 
 private sealed interface ReaderState {
@@ -96,19 +100,55 @@ private sealed interface ReaderState {
   data class Failed(val message: String) : ReaderState
 }
 
+/** What the reader is showing. */
+sealed interface ReaderTarget {
+  val title: String
+
+  /** Where the reading position is kept. */
+  val stateKey: String
+
+  /** A file in the library. */
+  data class Local(val path: String) : ReaderTarget {
+    override val title: String
+      get() = File(path).nameWithoutExtension
+
+    override val stateKey: String
+      get() = File(path).name
+  }
+
+  /** A book on a server, fetched a page at a time. */
+  data class Online(val sourceId: String, val bookId: String, override val title: String) : ReaderTarget {
+    override val stateKey: String
+      get() = "online|$sourceId|$bookId"
+  }
+}
+
+private suspend fun open(target: ReaderTarget, app: ReaderApp): PageSource =
+  when (target) {
+    is ReaderTarget.Local -> withContext(Dispatchers.IO) { PageSource.open(File(target.path)) }
+    is ReaderTarget.Online -> {
+      val source =
+        app.sources().firstOrNull { it.id == target.sourceId } as? KomgaSource
+          ?: throw IOException("The server this book came from is no longer set up")
+      source.openBook(target.bookId, File(app.cacheDir, "online-pages"))
+    }
+  }
+
 @Composable
-fun ReaderScreen(path: String, onBack: () -> Unit) {
+fun ReaderScreen(target: ReaderTarget, onBack: () -> Unit) {
   val app = LocalContext.current.applicationContext as ReaderApp
-  val file = remember(path) { File(path) }
   val state by
-    produceState<ReaderState>(ReaderState.Opening, file) {
+    produceState<ReaderState>(ReaderState.Opening, target) {
       value =
-        withContext(Dispatchers.IO) {
-          runCatching { PageSource.open(file) }
-            .fold(
-              { if (it.pageCount == 0) ReaderState.Failed("This file has no readable pages") else ReaderState.Ready(it) },
-              { ReaderState.Failed(it.message ?: "Could not open this file") },
-            )
+        try {
+          val pages = open(target, app)
+          if (pages.pageCount == 0) ReaderState.Failed("This comic has no readable pages") else ReaderState.Ready(pages)
+        } catch (e: CancellationException) {
+          throw e
+        } catch (e: Exception) {
+          ReaderState.Failed(
+            if (target is ReaderTarget.Online) ServerCheck.describe(e, "a Komga server") else e.message ?: "Could not open this file"
+          )
         }
     }
   DisposableEffect(state) {
@@ -129,16 +169,16 @@ fun ReaderScreen(path: String, onBack: () -> Unit) {
           TextButton(onClick = onBack) { Text("Back") }
         }
       is ReaderState.Ready -> {
-        val saved = remember(file) { app.library.state(file) }
+        val saved = remember(target) { app.library.state(target.stateKey) }
         Pages(
-          title = file.nameWithoutExtension,
+          title = target.title,
           pages = s.pages,
           startPage = saved.lastPage,
           startRightToLeft = saved.rightToLeft,
           showControls = showControls,
           onToggleControls = { showControls = !showControls },
           onPosition = { page, rtl ->
-            app.library.updateState(file) {
+            app.library.updateState(target.stateKey) {
               it.copy(lastPage = page, pageCount = s.pages.pageCount, rightToLeft = rtl, lastOpened = System.currentTimeMillis())
             }
           },

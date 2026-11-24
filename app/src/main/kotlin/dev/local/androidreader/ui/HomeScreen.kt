@@ -13,12 +13,17 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -44,6 +49,8 @@ import dev.local.androidreader.browser.BrowserState
 import dev.local.androidreader.download.Downloader
 import dev.local.androidreader.library.Comic
 import dev.local.androidreader.library.Importer
+import dev.local.androidreader.library.ThemeMode
+import dev.local.androidreader.source.CatalogEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -58,7 +65,11 @@ private enum class Tab(val label: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(onOpenComic: (Comic) -> Unit, browseViewModel: BrowseViewModel = viewModel()) {
+fun HomeScreen(
+  onOpenComic: (Comic) -> Unit,
+  onReadOnline: (CatalogEntry) -> Unit,
+  browseViewModel: BrowseViewModel = viewModel(),
+) {
   val context = LocalContext.current
   val app = context.applicationContext as ReaderApp
   var tabIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -69,6 +80,7 @@ fun HomeScreen(onOpenComic: (Comic) -> Unit, browseViewModel: BrowseViewModel = 
   val comics by app.library.comics.collectAsStateWithLifecycle()
   val downloads by app.downloads.items.collectAsStateWithLifecycle(emptyList())
   val browse by browseViewModel.state.collectAsStateWithLifecycle()
+  val themeMode by app.library.themeMode.collectAsStateWithLifecycle()
 
   // Downloads finish in the background, so pick up new files whenever the list changes.
   LaunchedEffect(downloads) { withContext(Dispatchers.IO) { app.library.refresh() } }
@@ -107,7 +119,14 @@ fun HomeScreen(onOpenComic: (Comic) -> Unit, browseViewModel: BrowseViewModel = 
 
   Scaffold(
     // The Web tab has its own address bar and needs the vertical space.
-    topBar = { if (tab != Tab.WEB) TopAppBar(title = { Text(if (tab == Tab.LIBRARY) "Android Reader" else tab.label) }) },
+    topBar = {
+      if (tab != Tab.WEB) {
+        TopAppBar(
+          title = { Text(if (tab == Tab.LIBRARY) "Android Reader" else tab.label) },
+          actions = { ThemeMenu(themeMode, onSelect = app.library::setTheme) },
+        )
+      }
+    },
     snackbarHost = { SnackbarHost(snackbar) },
     floatingActionButton = {
       if (tab == Tab.LIBRARY) {
@@ -155,6 +174,7 @@ fun HomeScreen(onOpenComic: (Comic) -> Unit, browseViewModel: BrowseViewModel = 
             askForNotifications()
             browseViewModel.download(entry, file)
           },
+          onReadOnline = onReadOnline,
           onDismissDetail = browseViewModel::dismissDetail,
           onAddOpds = browseViewModel::addOpds,
           onAddKomga = browseViewModel::addKomga,
@@ -186,6 +206,25 @@ fun HomeScreen(onOpenComic: (Comic) -> Unit, browseViewModel: BrowseViewModel = 
           onClearFinished = app.downloads::clearFinished,
           modifier = modifier,
         )
+    }
+  }
+}
+
+/** The settings button in the top bar: choose light, dark, or whatever the phone is set to. */
+@Composable
+private fun ThemeMenu(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
+  var open by remember { mutableStateOf(false) }
+  IconButton(onClick = { open = true }) { Icon(Icons.Default.Settings, contentDescription = "Appearance") }
+  DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+    ThemeMode.entries.forEach { mode ->
+      DropdownMenuItem(
+        text = { Text(mode.label) },
+        leadingIcon = { if (mode == current) Icon(Icons.Default.Check, contentDescription = "Selected") },
+        onClick = {
+          onSelect(mode)
+          open = false
+        },
+      )
     }
   }
 }

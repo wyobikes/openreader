@@ -58,6 +58,8 @@ data class CatalogEntry(
   val location: String? = null,
   /** Files already known from the listing; empty means call [ComicSource.files]. */
   val files: List<RemoteFile> = emptyList(),
+  /** Set when the source can show this book page by page without downloading the file. */
+  val onlineBookId: String? = null,
 ) {
   val isFolder: Boolean
     get() = location != null
