@@ -207,8 +207,6 @@ fun HomeScreen(
           onAddKomga = browseViewModel::addKomga,
           onTestOpds = browseViewModel::testOpds,
           onTestKomga = browseViewModel::testKomga,
-          onTestCalibre = browseViewModel::testCalibre,
-          onAddCalibre = browseViewModel::addCalibre,
           onClearServerCheck = browseViewModel::clearServerCheck,
           onRemoveCatalog = browseViewModel::removeSelectedCatalog,
           modifier = modifier,

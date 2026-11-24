@@ -38,7 +38,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -51,7 +50,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import dev.local.androidreader.source.CalibreConfig
 import dev.local.androidreader.source.CatalogEntry
 import dev.local.androidreader.source.ComicFormat
 import dev.local.androidreader.source.KomgaConfig
@@ -76,8 +74,6 @@ fun BrowseContent(
   onAddKomga: (KomgaConfig) -> Unit,
   onTestOpds: (OpdsConfig) -> Unit,
   onTestKomga: (KomgaConfig) -> Unit,
-  onTestCalibre: (CalibreConfig) -> Unit,
-  onAddCalibre: (CalibreConfig) -> Unit,
   onClearServerCheck: () -> Unit,
   onRemoveCatalog: () -> Unit,
   modifier: Modifier = Modifier,
@@ -213,12 +209,6 @@ fun BrowseContent(
         onClearServerCheck()
         onAddKomga(it)
       },
-      onTestCalibre = onTestCalibre,
-      onAddCalibre = {
-        showAddCatalog = false
-        onAddCalibre(it)
-        onClearServerCheck()
-      },
     )
   }
 }
@@ -236,13 +226,8 @@ internal fun AddCatalogDialog(
   onEdited: () -> Unit,
   onAddOpds: (OpdsConfig) -> Unit,
   onAddKomga: (KomgaConfig) -> Unit,
-  onTestCalibre: (CalibreConfig) -> Unit = {},
-  onAddCalibre: (CalibreConfig) -> Unit = {},
 ) {
-  // 0 = Komga, 1 = Calibre, 2 = OPDS
-  var kind by rememberSaveable { mutableIntStateOf(0) }
-  val komga = kind == 0
-  val calibre = kind == 1
+  var komga by rememberSaveable { mutableStateOf(true) }
   var name by rememberSaveable { mutableStateOf("") }
   var url by rememberSaveable { mutableStateOf("") }
   var username by rememberSaveable { mutableStateOf("") }
@@ -253,7 +238,6 @@ internal fun AddCatalogDialog(
   val label = name.trim().ifEmpty { trimmedUrl.substringAfter("://").substringBefore('/') }
   val komgaConfig = KomgaConfig(label, trimmedUrl.trimEnd('/'), username.trim(), password, apiKey.trim())
   val opdsConfig = OpdsConfig(label, trimmedUrl, username.trim(), password)
-  val calibreConfig = CalibreConfig(label, trimmedUrl.trimEnd('/'), username.trim(), password)
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -261,16 +245,22 @@ internal fun AddCatalogDialog(
     text = {
       Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          listOf("Komga", "Calibre", "OPDS").forEachIndexed { index, label ->
-            FilterChip(
-              selected = kind == index,
-              onClick = {
-                kind = index
-                onEdited()
-              },
-              label = { Text(label) },
-            )
-          }
+          FilterChip(
+            selected = komga,
+            onClick = {
+              komga = true
+              onEdited()
+            },
+            label = { Text("Komga") },
+          )
+          FilterChip(
+            selected = !komga,
+            onClick = {
+              komga = false
+              onEdited()
+            },
+            label = { Text("OPDS") },
+          )
         }
         // The name is only a label, so changing it does not invalidate a passed test.
         OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
@@ -280,16 +270,8 @@ internal fun AddCatalogDialog(
             url = it
             onEdited()
           },
-          label = { Text(if (kind == 2) "Catalogue URL" else "Server address") },
-          placeholder = {
-            Text(
-              when (kind) {
-                0 -> "http://192.168.1.10:25600"
-                1 -> "http://192.168.1.10:8080"
-                else -> "https://server/opds/v1.2/catalog"
-              }
-            )
-          },
+          label = { Text(if (komga) "Server address" else "Catalogue URL") },
+          placeholder = { Text(if (komga) "http://192.168.1.10:25600" else "https://server/opds/v1.2/catalog") },
           singleLine = true,
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
@@ -327,24 +309,10 @@ internal fun AddCatalogDialog(
           )
         }
 
-        if (calibre) {
-          Text(
-            "In Calibre: Connect/share, then Start content server. Leave the sign-in fields empty if the server does not ask for one.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-        }
-
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
           OutlinedButton(
             enabled = validUrl && check != ServerCheck.Running,
-            onClick = {
-              when (kind) {
-                0 -> onTestKomga(komgaConfig)
-                1 -> onTestCalibre(calibreConfig)
-                else -> onTestOpds(opdsConfig)
-              }
-            },
+            onClick = { if (komga) onTestKomga(komgaConfig) else onTestOpds(opdsConfig) },
           ) {
             Text("Test connection")
           }
@@ -366,13 +334,7 @@ internal fun AddCatalogDialog(
     confirmButton = {
       TextButton(
         enabled = check is ServerCheck.Passed,
-        onClick = {
-          when (kind) {
-            0 -> onAddKomga(komgaConfig)
-            1 -> onAddCalibre(calibreConfig)
-            else -> onAddOpds(opdsConfig)
-          }
-        },
+        onClick = { if (komga) onAddKomga(komgaConfig) else onAddOpds(opdsConfig) },
       ) {
         Text("Add")
       }
@@ -396,7 +358,7 @@ fun BrowseContentPreview() {
         sources = listOf(SourceInfo("ia", "Internet Archive", false), SourceInfo("opds:x", "Home server", true)),
         entries = entries,
       ),
-      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {},
     )
   }
 }
@@ -419,7 +381,7 @@ fun BrowseDetailPreview() {
             ),
           ),
       ),
-      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {},
     )
   }
 }
