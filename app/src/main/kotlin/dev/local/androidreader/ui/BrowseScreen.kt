@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -50,6 +51,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.local.androidreader.source.CatalogEntry
 import dev.local.androidreader.source.ComicFormat
+import dev.local.androidreader.source.KomgaConfig
 import dev.local.androidreader.source.OpdsConfig
 import dev.local.androidreader.source.RemoteFile
 import dev.local.androidreader.ui.theme.ReaderTheme
@@ -64,7 +66,8 @@ fun BrowseContent(
   onGoUp: () -> Unit,
   onDownload: (CatalogEntry, RemoteFile) -> Unit,
   onDismissDetail: () -> Unit,
-  onAddCatalog: (OpdsConfig) -> Unit,
+  onAddOpds: (OpdsConfig) -> Unit,
+  onAddKomga: (KomgaConfig) -> Unit,
   onRemoveCatalog: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -79,7 +82,7 @@ fun BrowseContent(
       state.sources.forEachIndexed { index, source ->
         FilterChip(selected = index == state.selected, onClick = { onSelectSource(index) }, label = { Text(source.name) })
       }
-      AssistChip(onClick = { showAddCatalog = true }, label = { Text("+ OPDS catalogue") })
+      AssistChip(onClick = { showAddCatalog = true }, label = { Text("+ Add server") })
     }
 
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -99,7 +102,7 @@ fun BrowseContent(
     }
 
     if (state.sources.getOrNull(state.selected)?.removable == true && !state.canGoUp) {
-      TextButton(onClick = onRemoveCatalog, modifier = Modifier.padding(horizontal = 4.dp)) { Text("Remove this catalogue") }
+      TextButton(onClick = onRemoveCatalog, modifier = Modifier.padding(horizontal = 4.dp)) { Text("Remove this server") }
     }
 
     LazyColumn(Modifier.fillMaxSize()) {
@@ -108,7 +111,12 @@ fun BrowseContent(
           headlineContent = { Text(entry.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
           supportingContent = entry.subtitle?.let { { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
           leadingContent = {
-            RemoteThumbnail(entry.thumbnailUrl, entry.title, Modifier.size(width = 48.dp, height = 68.dp).clip(RoundedCornerShape(4.dp)))
+            RemoteThumbnail(
+              entry.thumbnailUrl,
+              entry.title,
+              Modifier.size(width = 48.dp, height = 68.dp).clip(RoundedCornerShape(4.dp)),
+              state.thumbnailHeaders,
+            )
           },
           trailingContent = if (entry.isFolder) ({ Text("›", style = MaterialTheme.typography.titleLarge) }) else null,
           modifier = Modifier.clickable { onOpen(entry) },
@@ -162,52 +170,76 @@ fun BrowseContent(
   if (showAddCatalog) {
     AddCatalogDialog(
       onDismiss = { showAddCatalog = false },
-      onAdd = {
+      onAddOpds = {
         showAddCatalog = false
-        onAddCatalog(it)
+        onAddOpds(it)
+      },
+      onAddKomga = {
+        showAddCatalog = false
+        onAddKomga(it)
       },
     )
   }
 }
 
 @Composable
-private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (OpdsConfig) -> Unit) {
+private fun AddCatalogDialog(onDismiss: () -> Unit, onAddOpds: (OpdsConfig) -> Unit, onAddKomga: (KomgaConfig) -> Unit) {
+  var komga by rememberSaveable { mutableStateOf(true) }
   var name by rememberSaveable { mutableStateOf("") }
   var url by rememberSaveable { mutableStateOf("") }
   var username by rememberSaveable { mutableStateOf("") }
   var password by rememberSaveable { mutableStateOf("") }
+  var apiKey by rememberSaveable { mutableStateOf("") }
   val trimmedUrl = url.trim()
   val valid = trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Add OPDS catalogue") },
+    title = { Text("Add server") },
     text = {
-      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          FilterChip(selected = komga, onClick = { komga = true }, label = { Text("Komga") })
+          FilterChip(selected = !komga, onClick = { komga = false }, label = { Text("OPDS") })
+        }
         OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
         OutlinedTextField(
           url,
           { url = it },
-          label = { Text("Catalogue URL") },
-          placeholder = { Text("https://server/opds/v1.2/catalog") },
+          label = { Text(if (komga) "Server address" else "Catalogue URL") },
+          placeholder = { Text(if (komga) "http://192.168.1.10:25600" else "https://server/opds/v1.2/catalog") },
           singleLine = true,
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
-        OutlinedTextField(username, { username = it }, label = { Text("Username (optional)") }, singleLine = true)
+        OutlinedTextField(username, { username = it }, label = { Text(if (komga) "Email" else "Username (optional)") }, singleLine = true)
         OutlinedTextField(
           password,
           { password = it },
-          label = { Text("Password (optional)") },
+          label = { Text(if (komga) "Password" else "Password (optional)") },
           singleLine = true,
           visualTransformation = PasswordVisualTransformation(),
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         )
+        if (komga) {
+          OutlinedTextField(
+            apiKey,
+            { apiKey = it },
+            label = { Text("API key (instead of email and password)") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+          )
+        }
       }
     },
     confirmButton = {
       TextButton(
         enabled = valid,
-        onClick = { onAdd(OpdsConfig(name.trim().ifEmpty { trimmedUrl.substringAfter("://").substringBefore('/') }, trimmedUrl, username.trim(), password)) },
+        onClick = {
+          val label = name.trim().ifEmpty { trimmedUrl.substringAfter("://").substringBefore('/') }
+          if (komga) onAddKomga(KomgaConfig(label, trimmedUrl.trimEnd('/'), username.trim(), password, apiKey.trim()))
+          else onAddOpds(OpdsConfig(label, trimmedUrl, username.trim(), password))
+        },
       ) {
         Text("Add")
       }
@@ -231,7 +263,7 @@ fun BrowseContentPreview() {
         sources = listOf(SourceInfo("ia", "Internet Archive", false), SourceInfo("opds:x", "Home server", true)),
         entries = entries,
       ),
-      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {},
+      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {},
     )
   }
 }
@@ -254,7 +286,7 @@ fun BrowseDetailPreview() {
             ),
           ),
       ),
-      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {},
+      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {},
     )
   }
 }

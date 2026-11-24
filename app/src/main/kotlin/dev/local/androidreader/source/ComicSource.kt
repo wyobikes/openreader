@@ -71,6 +71,10 @@ interface ComicSource {
   val name: String
   val supportsSearch: Boolean
 
+  /** Headers (sign-in details) that requests to this source need, including thumbnails and downloads. */
+  val requestHeaders: Map<String, String>
+    get() = emptyMap()
+
   /** Lists a catalogue page. `null` is the source's start page. */
   suspend fun browse(location: String? = null): CatalogPage
 
