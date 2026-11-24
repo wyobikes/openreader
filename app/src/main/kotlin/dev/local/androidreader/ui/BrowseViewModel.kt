@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.local.androidreader.ReaderApp
+import dev.local.androidreader.source.CalibreConfig
+import dev.local.androidreader.source.CalibreSource
 import dev.local.androidreader.source.CatalogEntry
 import dev.local.androidreader.source.CatalogPage
 import dev.local.androidreader.source.ComicSource
@@ -56,13 +58,13 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
 
   init {
     viewModelScope.launch {
-      combine(app.library.opdsCatalogs, app.library.komgaServers) { _, _ -> }.collect {
+      combine(app.library.opdsCatalogs, app.library.komgaServers, app.library.calibreServers) { _, _, _ -> }.collect {
         val selectedId = current?.id
         sources = app.sources()
         val index = sources.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
         _state.update { s ->
           s.copy(
-            sources = sources.map { SourceInfo(it.id, it.name, it.id.startsWith("opds:") || it.id.startsWith("komga:")) },
+            sources = sources.map { SourceInfo(it.id, it.name, isUserServer(it.id)) },
             selected = index,
             thumbnailHeaders = sources[index].requestHeaders,
           )
@@ -108,7 +110,7 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
       val detail =
         try {
           val files = source.files(entry)
-          EntryDetail(entry, files, if (files.isEmpty()) "No comic files in this item" else null)
+          EntryDetail(entry, files, if (files.isEmpty()) "Nothing here in a format this app can read" else null)
         } catch (e: CancellationException) {
           throw e
         } catch (e: Exception) {
@@ -139,6 +141,20 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
 
   private var checkJob: Job? = null
 
+  private fun isUserServer(id: String) = id.startsWith("opds:") || id.startsWith("komga:") || id.startsWith("calibre:")
+
+  fun testCalibre(config: CalibreConfig) {
+    // Calibre's sign-in is answered per request, so the details must be known before saving.
+    app.calibreBeingTested = config
+    test(CalibreSource(app.httpClient, config), "a Calibre server")
+  }
+
+  fun addCalibre(config: CalibreConfig) {
+    app.library.saveCalibre(config)
+    app.calibreBeingTested = null
+    select(config.id)
+  }
+
   fun testOpds(config: OpdsConfig) = test(OpdsSource(app.httpClient, config), "an OPDS catalogue")
 
   fun testKomga(config: KomgaConfig) = test(KomgaSource(app.httpClient, config), "a Komga server")
@@ -156,6 +172,7 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
   /** Called when the details change or the dialog closes: an old result no longer applies. */
   fun clearServerCheck() {
     checkJob?.cancel()
+    app.calibreBeingTested = null
     _state.update { if (it.serverCheck == null) it else it.copy(serverCheck = null) }
   }
 
@@ -176,7 +193,7 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
     if (index < 0) return
     _state.update { s ->
       s.copy(
-        sources = sources.map { SourceInfo(it.id, it.name, it.id.startsWith("opds:") || it.id.startsWith("komga:")) },
+        sources = sources.map { SourceInfo(it.id, it.name, isUserServer(it.id)) },
         selected = index,
         thumbnailHeaders = sources[index].requestHeaders,
       )
@@ -188,6 +205,7 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
     val id = current?.id ?: return
     app.library.opdsCatalogs.value.firstOrNull { it.id == id }?.let(app.library::removeOpds)
     app.library.komgaServers.value.firstOrNull { it.id == id }?.let(app.library::removeKomga)
+    app.library.calibreServers.value.firstOrNull { it.id == id }?.let(app.library::removeCalibre)
   }
 
   private fun load(replace: Boolean, request: suspend (ComicSource) -> CatalogPage) {
