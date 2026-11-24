@@ -1,0 +1,127 @@
+package dev.local.longbox.library
+
+import dev.local.longbox.source.OpdsConfig
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.io.File
+
+@Serializable
+data class ComicState(
+  val lastPage: Int = 0,
+  val pageCount: Int = 0,
+  val rightToLeft: Boolean = false,
+  val lastOpened: Long = 0,
+)
+
+data class Comic(val file: File, val state: ComicState) {
+  val title: String
+    get() = file.nameWithoutExtension
+
+  val isFinished: Boolean
+    get() = state.pageCount > 0 && state.lastPage >= state.pageCount - 1
+
+  val isStarted: Boolean
+    get() = state.lastOpened > 0
+}
+
+@Serializable
+private data class Saved(
+  val comics: Map<String, ComicState> = emptyMap(),
+  val opds: List<OpdsConfig> = emptyList(),
+)
+
+/** The comics folder plus a small JSON file holding reading positions and catalogue settings. */
+class LibraryRepository(val dir: File, private val stateFile: File) {
+  private val json = Json { ignoreUnknownKeys = true }
+  private var saved: Saved = load()
+
+  private val _comics = MutableStateFlow<List<Comic>>(emptyList())
+  val comics: StateFlow<List<Comic>> = _comics.asStateFlow()
+
+  private val _opds = MutableStateFlow(saved.opds)
+  val opdsCatalogs: StateFlow<List<OpdsConfig>> = _opds.asStateFlow()
+
+  init {
+    refresh()
+  }
+
+  private fun load(): Saved =
+    runCatching { json.decodeFromString(Saved.serializer(), stateFile.readText()) }.getOrDefault(Saved())
+
+  @Synchronized
+  private fun persist(next: Saved) {
+    saved = next
+    val temp = File(stateFile.parentFile, stateFile.name + ".tmp")
+    temp.writeText(json.encodeToString(Saved.serializer(), next))
+    if (!temp.renameTo(stateFile)) {
+      temp.copyTo(stateFile, overwrite = true)
+      temp.delete()
+    }
+  }
+
+  /** Rescans the folder. Cheap enough to call after every import or delete. */
+  @Synchronized
+  fun refresh() {
+    dir.mkdirs()
+    val files =
+      dir.listFiles { f -> f.isFile && f.extension.lowercase().let { it == "cbz" || it == "pdf" } }.orEmpty()
+    _comics.value =
+      files
+        .map { Comic(it, saved.comics[it.name] ?: ComicState()) }
+        .sortedWith(compareBy(NaturalOrder) { it.title })
+  }
+
+  @Synchronized
+  fun updateState(file: File, transform: (ComicState) -> ComicState) {
+    val next = transform(saved.comics[file.name] ?: ComicState())
+    persist(saved.copy(comics = saved.comics + (file.name to next)))
+    _comics.update { list -> list.map { if (it.file == file) it.copy(state = next) else it } }
+  }
+
+  fun state(file: File): ComicState = saved.comics[file.name] ?: ComicState()
+
+  @Synchronized
+  fun delete(file: File) {
+    file.delete()
+    persist(saved.copy(comics = saved.comics - file.name))
+    refresh()
+  }
+
+  @Synchronized
+  fun saveOpds(config: OpdsConfig) {
+    persist(saved.copy(opds = saved.opds.filter { it.url != config.url } + config))
+    _opds.value = saved.opds
+  }
+
+  @Synchronized
+  fun removeOpds(config: OpdsConfig) {
+    persist(saved.copy(opds = saved.opds.filter { it.url != config.url }))
+    _opds.value = saved.opds
+  }
+}
+
+/** Orders "Issue 2" before "Issue 10" by comparing digit runs as numbers. */
+object NaturalOrder : Comparator<String> {
+  private val chunk = Regex("\\d+|\\D+")
+
+  override fun compare(a: String, b: String): Int {
+    val x = chunk.findAll(a.lowercase()).map { it.value }.iterator()
+    val y = chunk.findAll(b.lowercase()).map { it.value }.iterator()
+    while (x.hasNext() && y.hasNext()) {
+      val p = x.next()
+      val q = y.next()
+      val result =
+        if (p[0].isDigit() && q[0].isDigit()) {
+          val pn = p.trimStart('0')
+          val qn = q.trimStart('0')
+          if (pn.length != qn.length) pn.length - qn.length else pn.compareTo(qn)
+        } else p.compareTo(q)
+      if (result != 0) return result
+    }
+    return x.hasNext().compareTo(y.hasNext())
+  }
+}
