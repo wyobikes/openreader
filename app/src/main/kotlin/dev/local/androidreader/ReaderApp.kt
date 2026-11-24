@@ -6,6 +6,7 @@ import dev.local.androidreader.download.Downloader
 import dev.local.androidreader.library.LibraryRepository
 import dev.local.androidreader.source.ComicSource
 import dev.local.androidreader.source.InternetArchiveSource
+import dev.local.androidreader.source.KomgaSource
 import dev.local.androidreader.source.OpdsSource
 import okhttp3.OkHttpClient
 import java.io.File
@@ -41,5 +42,8 @@ class ReaderApp : Application() {
   private val internetArchive by lazy { InternetArchiveSource(httpClient) }
 
   /** Built-in sources followed by the user's OPDS catalogues. */
-  fun sources(): List<ComicSource> = listOf<ComicSource>(internetArchive) + library.opdsCatalogs.value.map { OpdsSource(httpClient, it) }
+  fun sources(): List<ComicSource> =
+    listOf<ComicSource>(internetArchive) +
+      library.komgaServers.value.map { KomgaSource(httpClient, it) } +
+      library.opdsCatalogs.value.map { OpdsSource(httpClient, it) }
 }

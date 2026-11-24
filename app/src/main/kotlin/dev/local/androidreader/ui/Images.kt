@@ -61,7 +61,7 @@ fun CoverImage(file: File, label: String, modifier: Modifier = Modifier) {
 
 /** A small catalogue thumbnail fetched over the network. */
 @Composable
-fun RemoteThumbnail(url: String?, label: String, modifier: Modifier = Modifier) {
+fun RemoteThumbnail(url: String?, label: String, modifier: Modifier = Modifier, headers: Map<String, String> = emptyMap()) {
   val app = LocalContext.current.applicationContext as? ReaderApp
   val bitmap by
     produceState(url?.let(thumbnails::get), url) {
@@ -69,7 +69,8 @@ fun RemoteThumbnail(url: String?, label: String, modifier: Modifier = Modifier) 
         value =
           withContext(Dispatchers.IO) {
             runCatching {
-                app.httpClient.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                val request = Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.build()
+                app.httpClient.newCall(request).execute().use { response ->
                   if (!response.isSuccessful) return@use null
                   // Thumbnails are small; cap the read so a wrong link cannot exhaust memory.
                   val source = response.body.source()

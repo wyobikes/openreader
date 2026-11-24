@@ -156,7 +156,8 @@ fun HomeScreen(onOpenComic: (Comic) -> Unit, browseViewModel: BrowseViewModel = 
             browseViewModel.download(entry, file)
           },
           onDismissDetail = browseViewModel::dismissDetail,
-          onAddCatalog = browseViewModel::addCatalog,
+          onAddOpds = browseViewModel::addOpds,
+          onAddKomga = browseViewModel::addKomga,
           onRemoveCatalog = browseViewModel::removeSelectedCatalog,
           modifier = modifier,
         )

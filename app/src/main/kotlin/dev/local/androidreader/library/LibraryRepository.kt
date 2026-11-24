@@ -1,5 +1,6 @@
 package dev.local.androidreader.library
 
+import dev.local.androidreader.source.KomgaConfig
 import dev.local.androidreader.source.OpdsConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +33,7 @@ data class Comic(val file: File, val state: ComicState) {
 private data class Saved(
   val comics: Map<String, ComicState> = emptyMap(),
   val opds: List<OpdsConfig> = emptyList(),
+  val komga: List<KomgaConfig> = emptyList(),
 )
 
 /** The comics folder plus a small JSON file holding reading positions and catalogue settings. */
@@ -44,6 +46,9 @@ class LibraryRepository(val dir: File, private val stateFile: File) {
 
   private val _opds = MutableStateFlow(saved.opds)
   val opdsCatalogs: StateFlow<List<OpdsConfig>> = _opds.asStateFlow()
+
+  private val _komga = MutableStateFlow(saved.komga)
+  val komgaServers: StateFlow<List<KomgaConfig>> = _komga.asStateFlow()
 
   init {
     refresh()
@@ -95,6 +100,18 @@ class LibraryRepository(val dir: File, private val stateFile: File) {
   fun saveOpds(config: OpdsConfig) {
     persist(saved.copy(opds = saved.opds.filter { it.url != config.url } + config))
     _opds.value = saved.opds
+  }
+
+  @Synchronized
+  fun saveKomga(config: KomgaConfig) {
+    persist(saved.copy(komga = saved.komga.filter { it.url != config.url } + config))
+    _komga.value = saved.komga
+  }
+
+  @Synchronized
+  fun removeKomga(config: KomgaConfig) {
+    persist(saved.copy(komga = saved.komga.filter { it.url != config.url }))
+    _komga.value = saved.komga
   }
 
   @Synchronized

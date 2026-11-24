@@ -7,12 +7,14 @@ import dev.local.androidreader.ReaderApp
 import dev.local.androidreader.source.CatalogEntry
 import dev.local.androidreader.source.CatalogPage
 import dev.local.androidreader.source.ComicSource
+import dev.local.androidreader.source.KomgaConfig
 import dev.local.androidreader.source.OpdsConfig
 import dev.local.androidreader.source.RemoteFile
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
@@ -31,6 +33,8 @@ data class BrowseUiState(
   val canGoUp: Boolean = false,
   val detail: EntryDetail? = null,
   val message: String? = null,
+  /** Sign-in headers the selected source needs for its thumbnails. */
+  val thumbnailHeaders: Map<String, String> = emptyMap(),
 )
 
 class BrowseViewModel(application: Application) : AndroidViewModel(application) {
@@ -47,12 +51,16 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
 
   init {
     viewModelScope.launch {
-      app.library.opdsCatalogs.collect {
+      combine(app.library.opdsCatalogs, app.library.komgaServers) { _, _ -> }.collect {
         val selectedId = current?.id
         sources = app.sources()
         val index = sources.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
         _state.update { s ->
-          s.copy(sources = sources.map { SourceInfo(it.id, it.name, it.id.startsWith("opds:")) }, selected = index)
+          s.copy(
+            sources = sources.map { SourceInfo(it.id, it.name, it.id.startsWith("opds:") || it.id.startsWith("komga:")) },
+            selected = index,
+            thumbnailHeaders = sources[index].requestHeaders,
+          )
         }
         if (selectedId == null || sources[index].id != selectedId) loadRoot()
       }
@@ -61,7 +69,7 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
 
   fun selectSource(index: Int) {
     if (index == _state.value.selected) return
-    _state.update { it.copy(selected = index) }
+    _state.update { it.copy(selected = index, thumbnailHeaders = sources.getOrNull(index)?.requestHeaders.orEmpty()) }
     loadRoot()
   }
 
@@ -124,15 +132,35 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
 
   fun messageShown() = _state.update { it.copy(message = null) }
 
-  fun addCatalog(config: OpdsConfig) {
+  fun addOpds(config: OpdsConfig) {
     app.library.saveOpds(config)
-    val index = sources.indexOfFirst { it.id == config.id }
-    if (index >= 0) selectSource(index)
+    select(config.id)
+  }
+
+  fun addKomga(config: KomgaConfig) {
+    app.library.saveKomga(config)
+    select(config.id)
+  }
+
+  private fun select(id: String) {
+    // The saved list is observed on the main thread, so the new source may not be listed yet.
+    sources = app.sources()
+    val index = sources.indexOfFirst { it.id == id }
+    if (index < 0) return
+    _state.update { s ->
+      s.copy(
+        sources = sources.map { SourceInfo(it.id, it.name, it.id.startsWith("opds:") || it.id.startsWith("komga:")) },
+        selected = index,
+        thumbnailHeaders = sources[index].requestHeaders,
+      )
+    }
+    loadRoot()
   }
 
   fun removeSelectedCatalog() {
     val id = current?.id ?: return
     app.library.opdsCatalogs.value.firstOrNull { it.id == id }?.let(app.library::removeOpds)
+    app.library.komgaServers.value.firstOrNull { it.id == id }?.let(app.library::removeKomga)
   }
 
   private fun load(replace: Boolean, request: suspend (ComicSource) -> CatalogPage) {

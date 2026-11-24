@@ -23,7 +23,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
-import okhttp3.Credentials
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -134,11 +133,9 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
     // background and rely on resume + retry.
     runCatching { setForeground(foregroundInfo(title, 0, 0)) }
 
+    // Sign-in details for the catalogue the file came from, plus anything the browser passed along.
     val headers =
-      app.library.opdsCatalogs.value
-        .firstOrNull { it.id == sourceId && it.username.isNotEmpty() }
-        ?.let { mapOf("Authorization" to Credentials.basic(it.username, it.password)) }
-        .orEmpty() +
+      app.sources().firstOrNull { it.id == sourceId }?.requestHeaders.orEmpty() +
         inputData.getStringArray(DownloadQueue.KEY_HEADERS).orEmpty().associate {
           it.substringBefore(": ") to it.substringAfter(": ")
         }

@@ -1,23 +1,39 @@
 package dev.local.androidreader.ui
 
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
+import android.os.Build
+import android.util.LruCache
+import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -30,8 +46,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -50,14 +68,23 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import dev.local.androidreader.ReaderApp
 import dev.local.androidreader.reader.PageSource
+import dev.local.androidreader.reader.ZoomMath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -89,6 +116,10 @@ fun ReaderScreen(path: String, onBack: () -> Unit) {
     onDispose { opened?.close() }
   }
 
+  var showControls by rememberSaveable { mutableStateOf(false) }
+  // Full screen while reading; the system bars come back together with the reader's own controls.
+  ReaderWindow(fullScreen = !showControls && state is ReaderState.Ready)
+
   Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
     when (val s = state) {
       ReaderState.Opening -> CircularProgressIndicator()
@@ -104,6 +135,8 @@ fun ReaderScreen(path: String, onBack: () -> Unit) {
           pages = s.pages,
           startPage = saved.lastPage,
           startRightToLeft = saved.rightToLeft,
+          showControls = showControls,
+          onToggleControls = { showControls = !showControls },
           onPosition = { page, rtl ->
             app.library.updateState(file) {
               it.copy(lastPage = page, pageCount = s.pages.pageCount, rightToLeft = rtl, lastOpened = System.currentTimeMillis())
@@ -116,53 +149,123 @@ fun ReaderScreen(path: String, onBack: () -> Unit) {
   }
 }
 
+private tailrec fun Context.findActivity(): Activity? =
+  when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+  }
+
+/**
+ * Puts the window into reading mode and restores it on leaving.
+ *
+ * The page always draws edge to edge, including under the camera cutout, so showing or hiding
+ * the system bars never changes the size of the page: the bars simply appear over it.
+ */
+// The cutout mode written back on leaving is the value read from the same field on entering.
+@SuppressLint("WrongConstant")
+@Composable
+private fun ReaderWindow(fullScreen: Boolean) {
+  val view = LocalView.current
+  val window = remember(view) { view.context.findActivity()?.window } ?: return
+
+  DisposableEffect(window) {
+    val controller = WindowCompat.getInsetsController(window, view)
+    val lightStatus = controller.isAppearanceLightStatusBars
+    val lightNavigation = controller.isAppearanceLightNavigationBars
+    val cutoutMode = if (Build.VERSION.SDK_INT >= 28) window.attributes.layoutInDisplayCutoutMode else 0
+
+    // The reader is black, so the bars need light icons whatever the app theme is.
+    controller.isAppearanceLightStatusBars = false
+    controller.isAppearanceLightNavigationBars = false
+    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    if (Build.VERSION.SDK_INT >= 28) {
+      // Without this the system letterboxes the window when the status bar hides, and the page jumps.
+      window.attributes =
+        window.attributes.apply {
+          layoutInDisplayCutoutMode =
+            if (Build.VERSION.SDK_INT >= 30) WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+    }
+
+    onDispose {
+      controller.show(WindowInsetsCompat.Type.systemBars())
+      controller.isAppearanceLightStatusBars = lightStatus
+      controller.isAppearanceLightNavigationBars = lightNavigation
+      window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      if (Build.VERSION.SDK_INT >= 28) {
+        window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = cutoutMode }
+      }
+    }
+  }
+
+  DisposableEffect(window, fullScreen) {
+    val controller = WindowCompat.getInsetsController(window, view)
+    // A swipe from the edge shows the bars briefly, then they hide again by themselves.
+    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    if (fullScreen) controller.hide(WindowInsetsCompat.Type.systemBars()) else controller.show(WindowInsetsCompat.Type.systemBars())
+    onDispose {}
+  }
+}
+
 @Composable
 private fun Pages(
   title: String,
   pages: PageSource,
   startPage: Int,
   startRightToLeft: Boolean,
+  showControls: Boolean,
+  onToggleControls: () -> Unit,
   onPosition: (page: Int, rightToLeft: Boolean) -> Unit,
   onBack: () -> Unit,
 ) {
   val pagerState = rememberPagerState(initialPage = startPage.coerceIn(0, pages.pageCount - 1)) { pages.pageCount }
   var rightToLeft by rememberSaveable { mutableStateOf(startRightToLeft) }
-  var showControls by rememberSaveable { mutableStateOf(false) }
+  // While a page is zoomed, one-finger drags pan the page instead of turning it.
+  var zoomed by remember { mutableStateOf(false) }
   val scope = rememberCoroutineScope()
 
   // Decode pages at about the window's pixel size: sharp when fitted, without wasting memory.
   val window = LocalWindowInfo.current.containerSize
   val maxSide = maxOf(window.width, window.height).coerceIn(1080, 2800)
+  // Recently shown pages stay decoded, so flipping back and forth is instant.
+  val cache = remember(pages, maxSide) { LruCache<Int, Bitmap>(5) }
 
   LaunchedEffect(pagerState.currentPage, rightToLeft) { onPosition(pagerState.currentPage, rightToLeft) }
 
   fun turn(delta: Int) {
     val target = (pagerState.currentPage + delta).coerceIn(0, pages.pageCount - 1)
-    scope.launch { pagerState.animateScrollToPage(target) }
+    if (target != pagerState.currentPage) scope.launch { pagerState.animateScrollToPage(target, animationSpec = tween(180)) }
   }
 
-  HorizontalPager(state = pagerState, reverseLayout = rightToLeft, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 1) { index ->
+  HorizontalPager(
+    state = pagerState,
+    reverseLayout = rightToLeft,
+    userScrollEnabled = !zoomed,
+    modifier = Modifier.fillMaxSize(),
+    beyondViewportPageCount = 1,
+    key = { it },
+  ) { index ->
     ZoomablePage(
       pages = pages,
       index = index,
       maxSide = maxSide,
-      onTap = { fraction ->
-        // Outer thirds turn the page; the middle shows or hides the controls.
-        val forward = if (rightToLeft) fraction < 0.33f else fraction > 0.67f
-        val backward = if (rightToLeft) fraction > 0.67f else fraction < 0.33f
-        when {
-          forward -> turn(1)
-          backward -> turn(-1)
-          else -> showControls = !showControls
-        }
-      },
+      cache = cache,
+      isCurrent = pagerState.settledPage == index,
+      onZoomChanged = { if (pagerState.currentPage == index) zoomed = it },
+      onEdgeTap = { leftEdge -> turn(if (leftEdge != rightToLeft) -1 else 1) },
+      onCentreTap = onToggleControls,
     )
   }
 
-  AnimatedVisibility(showControls, enter = fadeIn(), exit = fadeOut()) {
-    Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+  AnimatedVisibility(showControls, enter = fadeIn(tween(150)), exit = fadeOut(tween(150))) {
+    val scrim = Color.Black.copy(alpha = 0.8f)
+    // Keep the controls clear of the status bar, navigation bar and camera cutout.
+    val insets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+    Column(Modifier.fillMaxSize()) {
       Row(
-        Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.75f)).padding(4.dp),
+        Modifier.fillMaxWidth().background(scrim).windowInsetsPadding(insets.onlyTopAndSides()).padding(4.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         IconButton(onClick = onBack) {
@@ -172,65 +275,164 @@ private fun Pages(
         TextButton(onClick = { rightToLeft = !rightToLeft }) { Text(if (rightToLeft) "Right to left" else "Left to right") }
       }
       Box(Modifier.weight(1f))
-      Column(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.75f)).padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(
-          "Page ${pagerState.currentPage + 1} of ${pages.pageCount}",
-          color = Color.White,
-          style = MaterialTheme.typography.labelLarge,
-        )
+      Column(
+        Modifier.fillMaxWidth().background(scrim).windowInsetsPadding(insets.onlyBottomAndSides()).padding(horizontal = 16.dp, vertical = 8.dp)
+      ) {
+        // The slider shows where the drag will land and only jumps there on release,
+        // so dragging across a long comic does not decode every page on the way.
+        var dragging by remember { mutableStateOf<Float?>(null) }
+        val shown = dragging?.roundToInt() ?: pagerState.currentPage
+        Text("Page ${shown + 1} of ${pages.pageCount}", color = Color.White, style = MaterialTheme.typography.labelLarge)
         if (pages.pageCount > 1) {
-          Slider(
-            value = pagerState.currentPage.toFloat(),
-            onValueChange = { scope.launch { pagerState.scrollToPage(it.roundToInt()) } },
-            valueRange = 0f..(pages.pageCount - 1).toFloat(),
-          )
+          // The slider runs the same way the pages do.
+          CompositionLocalProvider(LocalLayoutDirection provides if (rightToLeft) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+            Slider(
+              value = dragging ?: pagerState.currentPage.toFloat(),
+              onValueChange = { dragging = it },
+              onValueChangeFinished = {
+                dragging?.let { target -> scope.launch { pagerState.scrollToPage(target.roundToInt()) } }
+                dragging = null
+              },
+              valueRange = 0f..(pages.pageCount - 1).toFloat(),
+            )
+          }
         }
       }
     }
   }
 }
 
-@Composable
-private fun ZoomablePage(pages: PageSource, index: Int, maxSide: Int, onTap: (xFraction: Float) -> Unit) {
-  val bitmap by
-    produceState<Result<Bitmap>?>(null, pages, index) {
-      value = withContext(Dispatchers.IO) { runCatching { pages.decode(index, maxSide) } }
+private fun WindowInsets.onlyTopAndSides(): WindowInsets = only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+
+private fun WindowInsets.onlyBottomAndSides(): WindowInsets = only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
+
+/** Zoom level and pan position of one page. */
+@Stable
+private class ZoomState {
+  var scale by mutableFloatStateOf(1f)
+  var offset by mutableStateOf(Offset.Zero)
+  var image by mutableStateOf(IntSize.Zero)
+
+  val isZoomed: Boolean
+    get() = scale > 1.01f
+
+  private fun clamp(target: Offset, targetScale: Float, box: IntSize): Offset {
+    val fitted = ZoomMath.fitted(image.width, image.height, box.width, box.height)
+    val p = ZoomMath.clamp(ZoomMath.Point(target.x, target.y), targetScale, fitted, box.width, box.height)
+    return Offset(p.x, p.y)
+  }
+
+  /** Applies one step of a pinch or drag. [centroid] is in the box's own coordinates. */
+  fun transform(centroid: Offset, pan: Offset, zoom: Float, box: IntSize) {
+    val newScale = (scale * zoom).coerceIn(1f, ZoomMath.MAX_SCALE)
+    val focus = centroid - Offset(box.width / 2f, box.height / 2f)
+    val moved = ZoomMath.zoomAbout(ZoomMath.Point(offset.x, offset.y), scale, newScale, ZoomMath.Point(focus.x, focus.y))
+    scale = newScale
+    offset = if (newScale == 1f) Offset.Zero else clamp(Offset(moved.x, moved.y) + pan, newScale, box)
+  }
+
+  suspend fun animateTo(targetScale: Float, targetOffset: Offset) {
+    val startScale = scale
+    val startOffset = offset
+    animate(0f, 1f, animationSpec = tween(200)) { t, _ ->
+      scale = startScale + (targetScale - startScale) * t
+      offset = startOffset + (targetOffset - startOffset) * t
     }
-  var scale by remember { mutableFloatStateOf(1f) }
-  var offset by remember { mutableStateOf(Offset.Zero) }
+  }
+
+  /** Double tap: zoom in on the tapped spot, or back out to the whole page. */
+  suspend fun toggle(tap: Offset, box: IntSize) {
+    if (isZoomed) return animateTo(1f, Offset.Zero)
+    val focus = tap - Offset(box.width / 2f, box.height / 2f)
+    val moved = ZoomMath.zoomAbout(ZoomMath.Point(0f, 0f), 1f, ZoomMath.DOUBLE_TAP_SCALE, ZoomMath.Point(focus.x, focus.y))
+    animateTo(ZoomMath.DOUBLE_TAP_SCALE, clamp(Offset(moved.x, moved.y), ZoomMath.DOUBLE_TAP_SCALE, box))
+  }
+
+  fun reset() {
+    scale = 1f
+    offset = Offset.Zero
+  }
+}
+
+@Composable
+private fun ZoomablePage(
+  pages: PageSource,
+  index: Int,
+  maxSide: Int,
+  cache: LruCache<Int, Bitmap>,
+  isCurrent: Boolean,
+  onZoomChanged: (Boolean) -> Unit,
+  onEdgeTap: (leftEdge: Boolean) -> Unit,
+  onCentreTap: () -> Unit,
+) {
+  val bitmap by
+    produceState(cache.get(index)?.let { Result.success(it) }, pages, index) {
+      if (value == null) {
+        value = withContext(Dispatchers.IO) { runCatching { pages.decode(index, maxSide).also { cache.put(index, it) } } }
+      }
+    }
+  val zoom = remember { ZoomState() }
+  val scope = rememberCoroutineScope()
+
+  LaunchedEffect(bitmap) { bitmap?.getOrNull()?.let { zoom.image = IntSize(it.width, it.height) } }
+  LaunchedEffect(zoom.isZoomed) { onZoomChanged(zoom.isZoomed) }
+  // A page that has been swiped away comes back at normal size.
+  LaunchedEffect(isCurrent) { if (!isCurrent) zoom.reset() }
 
   Box(
-    Modifier.fillMaxSize()
-      .pointerInput(Unit) {
-        detectTapGestures(
-          onDoubleTap = {
-            if (scale > 1f) {
-              scale = 1f
-              offset = Offset.Zero
-            } else {
-              scale = 2.5f
-            }
-          },
-          onTap = { if (scale == 1f) onTap(it.x / size.width) },
-        )
-      }
-      .pointerInput(Unit) {
-        awaitEachGesture {
-          awaitFirstDown(requireUnconsumed = false)
-          do {
-            val event = awaitPointerEvent()
-            // One finger at normal size belongs to the pager; pinching or panning a zoomed page is ours.
-            if (event.changes.size >= 2 || scale > 1f) {
-              scale = (scale * event.calculateZoom()).coerceIn(1f, 5f)
-              val limitX = size.width * (scale - 1f) / 2f
-              val limitY = size.height * (scale - 1f) / 2f
-              val moved = offset + event.calculatePan()
-              offset = Offset(moved.x.coerceIn(-limitX, limitX), moved.y.coerceIn(-limitY, limitY))
-              event.changes.forEach { if (it.positionChanged()) it.consume() }
-            }
-          } while (event.changes.any { it.pressed })
+    Modifier.fillMaxSize().pointerInput(Unit) {
+      val slop = viewConfiguration.touchSlop
+      awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        var moved = false
+        var pinched = false
+        var travelled = Offset.Zero
+        var upTime = down.uptimeMillis
+        var upPosition = down.position
+
+        while (true) {
+          val event = awaitPointerEvent()
+          if (event.changes.count { it.pressed } >= 2) pinched = true
+          // One finger at normal size belongs to the pager; pinching, or dragging a zoomed page, is ours.
+          if (pinched || zoom.isZoomed) {
+            val pan = event.calculatePan()
+            val zoomChange = event.calculateZoom()
+            if (zoomChange != 1f || pan != Offset.Zero) zoom.transform(event.calculateCentroid(useCurrent = true), pan, zoomChange, size)
+            event.changes.forEach { if (it.positionChanged()) it.consume() }
+          }
+          travelled += event.changes.first().let { it.position - it.previousPosition }
+          if (travelled.getDistance() > slop) moved = true
+          if (event.changes.none { it.pressed }) {
+            upTime = event.changes.first().uptimeMillis
+            upPosition = event.changes.first().position
+            break
+          }
         }
-      },
+
+        if (pinched) {
+          // Let go slightly zoomed: settle back to the whole page rather than leave it almost fitted.
+          if (zoom.scale < 1.1f) scope.launch { zoom.animateTo(1f, Offset.Zero) }
+          return@awaitEachGesture
+        }
+        if (moved || upTime - down.uptimeMillis > viewConfiguration.longPressTimeoutMillis) return@awaitEachGesture
+
+        // A tap. On the outer parts of an unzoomed page it turns the page at once.
+        val x = upPosition.x / size.width
+        if (!zoom.isZoomed && (x < 0.3f || x > 0.7f)) {
+          onEdgeTap(x < 0.3f)
+          return@awaitEachGesture
+        }
+        // Elsewhere, wait briefly to tell a single tap (controls) from a double tap (zoom).
+        val second = withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) { awaitFirstDown(requireUnconsumed = false) }
+        if (second == null) {
+          onCentreTap()
+        } else {
+          second.consume()
+          scope.launch { zoom.toggle(second.position, size) }
+          waitForUpOrCancellation()
+        }
+      }
+    },
     contentAlignment = Alignment.Center,
   ) {
     val result = bitmap
@@ -244,10 +446,10 @@ private fun ZoomablePage(pages: PageSource, index: Int, maxSide: Int, onTap: (xF
           contentScale = ContentScale.Fit,
           modifier =
             Modifier.fillMaxSize().graphicsLayer {
-              scaleX = scale
-              scaleY = scale
-              translationX = offset.x
-              translationY = offset.y
+              scaleX = zoom.scale
+              scaleY = zoom.scale
+              translationX = zoom.offset.x
+              translationY = zoom.offset.y
             },
         )
     }
