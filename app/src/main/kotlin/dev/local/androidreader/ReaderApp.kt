@@ -18,7 +18,12 @@ class ReaderApp : Application() {
       .connectTimeout(20, TimeUnit.SECONDS)
       .readTimeout(60, TimeUnit.SECONDS)
       .addInterceptor { chain ->
-        chain.proceed(chain.request().newBuilder().header("User-Agent", "OpenReader/1.0 (Android comic reader)").build())
+        // Browser downloads bring the page's own User-Agent; only fill it in when absent.
+        val request = chain.request()
+        chain.proceed(
+          if (request.header("User-Agent") != null) request
+          else request.newBuilder().header("User-Agent", "AndroidReader/1.0").build()
+        )
       }
       .build()
   }

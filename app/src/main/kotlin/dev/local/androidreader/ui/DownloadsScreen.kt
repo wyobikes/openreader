@@ -77,7 +77,7 @@ fun DownloadsContent(
     if (items.isEmpty()) {
       Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
         Text(
-          "No downloads. Paste a link above, or share one to Open Reader from your browser.",
+          "No downloads. Paste a link above, or share one to Android Reader from your browser.",
           textAlign = TextAlign.Center,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

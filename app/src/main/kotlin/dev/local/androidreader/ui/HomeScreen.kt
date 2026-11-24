@@ -9,7 +9,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -28,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,6 +40,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.local.androidreader.ReaderApp
+import dev.local.androidreader.browser.BrowserState
+import dev.local.androidreader.download.Downloader
 import dev.local.androidreader.library.Comic
 import dev.local.androidreader.library.Importer
 import kotlinx.coroutines.Dispatchers
@@ -46,7 +51,8 @@ import java.io.File
 
 private enum class Tab(val label: String) {
   LIBRARY("Library"),
-  BROWSE("Browse"),
+  BROWSE("Catalogues"),
+  WEB("Web"),
   DOWNLOADS("Downloads"),
 }
 
@@ -93,8 +99,15 @@ fun HomeScreen(onOpenComic: (Comic) -> Unit, browseViewModel: BrowseViewModel = 
 
   BackHandler(enabled = tab == Tab.BROWSE && browse.canGoUp) { browseViewModel.goUp() }
 
+  // Leaving the Web tab discards the engine view, so remember the address to return to.
+  var lastWebUrl by rememberSaveable { mutableStateOf(BrowserState.HOME_URL) }
+  val browser = remember { BrowserState(lastWebUrl) }
+  LaunchedEffect(browser.url) { lastWebUrl = browser.url }
+  BackHandler(enabled = tab == Tab.WEB && browser.canGoBack) { browser.controls?.back() }
+
   Scaffold(
-    topBar = { TopAppBar(title = { Text(if (tab == Tab.LIBRARY) "Open Reader" else tab.label) }) },
+    // The Web tab has its own address bar and needs the vertical space.
+    topBar = { if (tab != Tab.WEB) TopAppBar(title = { Text(if (tab == Tab.LIBRARY) "Android Reader" else tab.label) }) },
     snackbarHost = { SnackbarHost(snackbar) },
     floatingActionButton = {
       if (tab == Tab.LIBRARY) {
@@ -114,7 +127,8 @@ fun HomeScreen(onOpenComic: (Comic) -> Unit, browseViewModel: BrowseViewModel = 
               Icon(
                 when (item) {
                   Tab.LIBRARY -> Icons.Default.Home
-                  Tab.BROWSE -> Icons.Default.Search
+                  Tab.BROWSE -> Icons.AutoMirrored.Filled.List
+                  Tab.WEB -> Icons.Default.Search
                   Tab.DOWNLOADS -> Icons.Default.KeyboardArrowDown
                 },
                 contentDescription = null,
@@ -145,6 +159,17 @@ fun HomeScreen(onOpenComic: (Comic) -> Unit, browseViewModel: BrowseViewModel = 
           onAddCatalog = browseViewModel::addCatalog,
           onRemoveCatalog = browseViewModel::removeSelectedCatalog,
           modifier = modifier,
+        )
+      Tab.WEB ->
+        BrowserContent(
+          state = browser,
+          onDownload = { request ->
+            askForNotifications()
+            val name = request.fileName ?: Downloader.fileNameFromUrl(request.url)
+            app.downloads.enqueue(title = name ?: request.url, url = request.url, fileName = name, headers = request.headers)
+            scope.launch { snackbar.showSnackbar("Added to downloads: ${name ?: "file"}") }
+          },
+          modifier = modifier.statusBarsPadding(),
         )
       Tab.DOWNLOADS ->
         DownloadsContent(

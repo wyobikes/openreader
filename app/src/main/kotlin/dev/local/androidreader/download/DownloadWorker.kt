@@ -58,10 +58,20 @@ class DownloadQueue(context: Context) {
     workManager.getWorkInfosByTagFlow(TAG).map { infos -> infos.map(::toItem).sortedBy { it.status.ordinal } }
 
   /** [sourceId] lets the worker attach that catalogue's credentials to the request. */
-  fun enqueue(title: String, url: String, fileName: String? = null, sourceId: String? = null) {
+  fun enqueue(
+    title: String,
+    url: String,
+    fileName: String? = null,
+    sourceId: String? = null,
+    headers: Map<String, String> = emptyMap(),
+  ) {
+    // Request headers (cookies, referrer) from the in-app browser travel as "Name: value" lines.
+    val headerLines = headers.filterValues { it.isNotBlank() }.map { (k, v) -> "$k: $v" }.toTypedArray()
     val request =
       OneTimeWorkRequestBuilder<DownloadWorker>()
-        .setInputData(workDataOf(KEY_URL to url, KEY_NAME to fileName, KEY_TITLE to title, KEY_SOURCE to sourceId))
+        .setInputData(
+          workDataOf(KEY_URL to url, KEY_NAME to fileName, KEY_TITLE to title, KEY_SOURCE to sourceId, KEY_HEADERS to headerLines)
+        )
         .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
         .addTag(TAG)
         .addTag(TITLE_PREFIX + title.take(100))
@@ -105,6 +115,7 @@ class DownloadQueue(context: Context) {
     const val KEY_NAME = "name"
     const val KEY_TITLE = "title"
     const val KEY_SOURCE = "source"
+    const val KEY_HEADERS = "headers"
     const val KEY_DONE = "done"
     const val KEY_TOTAL = "total"
     const val KEY_ERROR = "error"
@@ -127,7 +138,10 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
       app.library.opdsCatalogs.value
         .firstOrNull { it.id == sourceId && it.username.isNotEmpty() }
         ?.let { mapOf("Authorization" to Credentials.basic(it.username, it.password)) }
-        .orEmpty()
+        .orEmpty() +
+        inputData.getStringArray(DownloadQueue.KEY_HEADERS).orEmpty().associate {
+          it.substringBefore(": ") to it.substringAfter(": ")
+        }
 
     // A stable temp name per URL lets a retried job resume the same partial file.
     val temp = File(File(applicationContext.cacheDir, "downloads").apply { mkdirs() }, sha1(url))
