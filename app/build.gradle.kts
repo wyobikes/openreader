@@ -181,6 +181,8 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.androidx.work.runtime)
   implementation(libs.junrar)
+  // Text extraction for the PDF to EPUB conversion
+  implementation(libs.pdfbox.android)
   testImplementation(libs.okhttp.mockwebserver)
 
   // Navigation

@@ -50,7 +50,7 @@ object Importer {
         ComicFormat.PDF -> listOf(moveInto(file, libraryDir, "$title.pdf"))
         ComicFormat.ZIP -> importZip(file, libraryDir, title, depth)
         ComicFormat.CBR -> importRar(file, libraryDir, title, depth)
-        else -> throw IOException("\"$displayName\" is not a CBZ, CBR, ZIP or PDF file")
+        else -> throw IOException("\"$displayName\" is not a CBZ, CBR, ZIP, PDF or EPUB file")
       }
     } finally {
       file.delete()
@@ -58,11 +58,16 @@ object Importer {
   }
 
   private fun importZip(file: File, libraryDir: File, title: String, depth: Int): List<File> {
+    var isEpub = false
     val (bundled, images) =
       ZipFile(file).use { zip ->
         val names = zip.entries().asSequence().filter { !it.isDirectory }.map { it.name }.toList()
         val bundledNames = names.filter(::isComicFile)
-        if (bundledNames.isNotEmpty() && depth == 0) {
+        // An EPUB is itself a zip; this file is what marks one.
+        if (names.any { it == "META-INF/container.xml" }) {
+          isEpub = true
+          emptyList<Pair<File, String>>() to 0
+        } else if (bundledNames.isNotEmpty() && depth == 0) {
           val extracted =
             bundledNames.map { name ->
               val temp = File.createTempFile("bundle", ".tmp", libraryDir)
@@ -74,6 +79,7 @@ object Importer {
           emptyList<Pair<File, String>>() to names.count(::isImage)
         }
       }
+    if (isEpub) return listOf(moveInto(file, libraryDir, "$title.epub"))
     if (bundled.isNotEmpty()) return importBundle(bundled, libraryDir)
     if (images == 0) throw IOException("\"$title\" contains no comic pages")
     return listOf(moveInto(file, libraryDir, "$title.cbz"))
@@ -150,7 +156,8 @@ object Importer {
     return base.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), " ").replace(Regex("\\s+"), " ").trim().trim('.').ifEmpty { "comic" }
   }
 
-  private fun uniqueFile(dir: File, name: String): File {
+  /** A file in [dir] called [name], or with " (2)", " (3)"… added if that is taken. */
+  fun uniqueFile(dir: File, name: String): File {
     var candidate = File(dir, name)
     var n = 2
     while (candidate.exists()) {

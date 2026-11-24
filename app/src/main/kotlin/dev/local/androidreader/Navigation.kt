@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import dev.local.androidreader.ui.BookReaderScreen
 import dev.local.androidreader.ui.HomeScreen
 import dev.local.androidreader.ui.ReaderScreen
 import dev.local.androidreader.ui.ReaderTarget
@@ -23,7 +24,14 @@ fun MainNavigation() {
             onReadOnline = { entry -> entry.onlineBookId?.let { backStack.add(OnlineReader(entry.sourceId, it, entry.title)) } },
           )
         }
-        entry<Reader> { key -> ReaderScreen(ReaderTarget.Local(key.path), onBack = { backStack.removeLastOrNull() }) }
+        entry<Reader> { key ->
+          // Books are scrolling text; comics and PDFs are pages of images.
+          if (key.path.endsWith(".epub", ignoreCase = true)) {
+            BookReaderScreen(key.path, onBack = { backStack.removeLastOrNull() })
+          } else {
+            ReaderScreen(ReaderTarget.Local(key.path), onBack = { backStack.removeLastOrNull() })
+          }
+        }
         entry<OnlineReader> { key ->
           ReaderScreen(ReaderTarget.Online(key.sourceId, key.bookId, key.title), onBack = { backStack.removeLastOrNull() })
         }

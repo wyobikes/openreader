@@ -27,6 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -47,6 +48,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.local.androidreader.ReaderApp
 import dev.local.androidreader.browser.BrowserState
 import dev.local.androidreader.download.Downloader
+import dev.local.androidreader.epub.PdfToEpub
 import dev.local.androidreader.library.Comic
 import dev.local.androidreader.library.Importer
 import dev.local.androidreader.library.ThemeMode
@@ -55,6 +57,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.coroutines.cancellation.CancellationException
 
 private enum class Tab(val label: String) {
   LIBRARY("Library"),
@@ -81,6 +84,7 @@ fun HomeScreen(
   val downloads by app.downloads.items.collectAsStateWithLifecycle(emptyList())
   val browse by browseViewModel.state.collectAsStateWithLifecycle()
   val themeMode by app.library.themeMode.collectAsStateWithLifecycle()
+  val convertPdf by app.library.convertPdfToEpub.collectAsStateWithLifecycle()
 
   // Downloads finish in the background, so pick up new files whenever the list changes.
   LaunchedEffect(downloads) { withContext(Dispatchers.IO) { app.library.refresh() } }
@@ -161,7 +165,30 @@ fun HomeScreen(
     val modifier = Modifier.padding(padding)
     when (tab) {
       Tab.LIBRARY ->
-        LibraryContent(comics, onOpen = onOpenComic, onDelete = { app.library.delete(it.file) }, modifier = modifier)
+        LibraryContent(
+          comics,
+          onOpen = onOpenComic,
+          onDelete = { app.library.delete(it.file) },
+          modifier = modifier,
+          onConvertToEpub = { comic ->
+            scope.launch {
+              snackbar.showSnackbar("Converting ${comic.title}…", duration = SnackbarDuration.Short)
+              val message =
+                withContext(Dispatchers.IO) {
+                  try {
+                    val epub = PdfToEpub.convert(context, comic.file, app.library.dir)
+                    app.library.refresh()
+                    "Made ${epub.name}"
+                  } catch (e: CancellationException) {
+                    throw e
+                  } catch (e: Exception) {
+                    e.message ?: "Could not convert this PDF"
+                  }
+                }
+              snackbar.showSnackbar(message)
+            }
+          },
+        )
       Tab.BROWSE ->
         BrowseContent(
           state = browse,
@@ -205,6 +232,8 @@ fun HomeScreen(
           onCancel = app.downloads::cancel,
           onClearFinished = app.downloads::clearFinished,
           modifier = modifier,
+          convertPdfToEpub = convertPdf,
+          onConvertPdfToEpubChange = app.library::setConvertPdfToEpub,
         )
     }
   }

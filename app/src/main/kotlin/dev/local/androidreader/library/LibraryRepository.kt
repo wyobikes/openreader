@@ -16,6 +16,8 @@ data class ComicState(
   val pageCount: Int = 0,
   val rightToLeft: Boolean = false,
   val lastOpened: Long = 0,
+  /** For books: how far down the current chapter, from 0 to 1. */
+  val scroll: Float = 0f,
 )
 
 data class Comic(val file: File, val state: ComicState) {
@@ -27,6 +29,10 @@ data class Comic(val file: File, val state: ComicState) {
 
   val isStarted: Boolean
     get() = state.lastOpened > 0
+
+  /** A text book (EPUB), as opposed to a comic or PDF made of page images. */
+  val isBook: Boolean
+    get() = file.extension.equals("epub", ignoreCase = true)
 }
 
 /** Which colours the app uses. */
@@ -42,6 +48,8 @@ private data class Saved(
   val opds: List<OpdsConfig> = emptyList(),
   val komga: List<KomgaConfig> = emptyList(),
   val theme: ThemeMode = ThemeMode.SYSTEM,
+  val convertPdfToEpub: Boolean = false,
+  val bookTextZoom: Int = 100,
 )
 
 /** The comics folder plus a small JSON file holding reading positions and catalogue settings. */
@@ -63,6 +71,24 @@ class LibraryRepository(val dir: File, private val stateFile: File) {
     persist(saved.copy(theme = mode))
     _theme.value = mode
   }
+
+  private val _convertPdf = MutableStateFlow(saved.convertPdfToEpub)
+
+  /** When on, a downloaded PDF also gets an EPUB copy made from its text. */
+  val convertPdfToEpub: StateFlow<Boolean> = _convertPdf.asStateFlow()
+
+  @Synchronized
+  fun setConvertPdfToEpub(enabled: Boolean) {
+    persist(saved.copy(convertPdfToEpub = enabled))
+    _convertPdf.value = enabled
+  }
+
+  /** Text size in the book reader, as a percentage. */
+  val bookTextZoom: Int
+    get() = saved.bookTextZoom
+
+  @Synchronized
+  fun setBookTextZoom(percent: Int) = persist(saved.copy(bookTextZoom = percent.coerceIn(60, 250)))
 
   private val _komga = MutableStateFlow(saved.komga)
   val komgaServers: StateFlow<List<KomgaConfig>> = _komga.asStateFlow()
@@ -90,7 +116,7 @@ class LibraryRepository(val dir: File, private val stateFile: File) {
   fun refresh() {
     dir.mkdirs()
     val files =
-      dir.listFiles { f -> f.isFile && f.extension.lowercase().let { it == "cbz" || it == "pdf" } }.orEmpty()
+      dir.listFiles { f -> f.isFile && f.extension.lowercase().let { it == "cbz" || it == "pdf" || it == "epub" } }.orEmpty()
     _comics.value =
       files
         .map { Comic(it, saved.comics[it.name] ?: ComicState()) }

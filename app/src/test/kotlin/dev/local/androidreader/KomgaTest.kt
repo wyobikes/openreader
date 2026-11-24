@@ -90,10 +90,14 @@ class KomgaTest {
     assertEquals("metadata.numberSort,asc", request.url.queryParameter("sort"))
     assertEquals("""{"condition":{"seriesId":{"operator":"is","value":"S1"}}}""", request.body!!.utf8())
 
-    // The EPUB is left out.
-    assertEquals(2, page.entries.size)
+    assertEquals(3, page.entries.size)
     assertNull(page.nextLocation)
-    val (first, second) = page.entries
+    val (first, second, third) = page.entries
+    // Image-based books can be read online; an EPUB is download only.
+    assertEquals("B1", first.onlineBookId)
+    assertNull(third.onlineBookId)
+    assertEquals(ComicFormat.EPUB, third.files.single().format)
+    assertEquals("novel.epub", third.files.single().name)
     assertEquals("#1 · The Golden Amazons", first.title)
     assertEquals("Planet Stories · 36 pages", first.subtitle)
     val file = komga.files(first).single()

@@ -11,7 +11,8 @@ enum class ComicFormat {
   CBZ,
   CBR,
   PDF,
-  ZIP;
+  ZIP,
+  EPUB;
 
   companion object {
     /** Guesses the format from a file name or URL path; null when it is not a comic file. */
@@ -23,6 +24,7 @@ enum class ComicFormat {
         "cbr" -> CBR
         "pdf" -> PDF
         "zip" -> ZIP
+        "epub" -> EPUB
         else -> null
       }
     }
@@ -33,6 +35,7 @@ enum class ComicFormat {
         "application/vnd.comicbook-rar", "application/x-cbr" -> CBR
         "application/pdf" -> PDF
         "application/zip" -> ZIP
+        "application/epub+zip" -> EPUB
         else -> null
       }
   }
