@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Shown for the instant before the app draws, when the system is in dark mode. -->
+    <style name="Theme.AndroidReader" parent="android:Theme.Material.NoActionBar" />
+</resources>

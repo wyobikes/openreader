@@ -18,6 +18,10 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import dev.local.androidreader.reader.PageSource
+import dev.local.androidreader.reader.RemotePageStore
+import dev.local.androidreader.reader.RemotePages
+import java.io.File
 import java.io.IOException
 
 @Serializable
@@ -67,6 +71,23 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
 
   override suspend fun files(entry: CatalogEntry): List<RemoteFile> = entry.files
 
+  /**
+   * Opens a book for reading straight from the server. Asks Komga for the page list, then pages
+   * are fetched as they are turned to and cached under [cacheRoot].
+   */
+  suspend fun openBook(bookId: String, cacheRoot: File): PageSource {
+    val pageCount = parsePageCount(client.getText("$base/api/v1/books/$bookId/pages", requestHeaders))
+    if (pageCount == 0) throw IOException("The server lists no pages for this book")
+    val dir = File(cacheRoot, RemotePageStore.folderName("$id|$bookId"))
+    withContext(Dispatchers.IO) {
+      RemotePageStore.trim(cacheRoot, PAGE_CACHE_BYTES, keep = dir)
+      dir.mkdirs()
+      // Marks the book as recently read, so it is the last to be cleared from the cache.
+      dir.setLastModified(System.currentTimeMillis())
+    }
+    return RemotePages(pageCount, RemotePageStore(client, requestHeaders, dir) { index, fallback -> pageUrl(base, bookId, index, fallback) })
+  }
+
   private fun parseSeries(body: String, location: String) = parseSeries(body, location, id, base)
 
   private fun parseBooks(body: String, location: String) = parseBooks(body, location, id, base)
@@ -97,6 +118,17 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
     const val SERIES = "series"
     const val SEARCH = "search"
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** How much disk the pages of books read online may take before older books are cleared. */
+    const val PAGE_CACHE_BYTES = 400L * 1024 * 1024
+
+    /** Komga numbers pages from 1. `convert=jpeg` has the server re-encode formats the phone cannot show. */
+    fun pageUrl(base: String, bookId: String, index: Int, convert: Boolean): String =
+      "$base/api/v1/books/$bookId/pages/${index + 1}" + if (convert) "?convert=jpeg" else ""
+
+    fun parsePageCount(body: String): Int =
+      (runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonArray)?.size
+        ?: throw WrongServerException("The server did not return a page list")
 
     fun condition(field: String, value: String): JsonObject = buildJsonObject {
       putJsonObject("condition") {
@@ -171,6 +203,7 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
             title = listOfNotNull(metadata?.get("number").text()?.let { "#$it" }, title).joinToString(" · "),
             subtitle = listOfNotNull(o["seriesTitle"].text(), pages?.let { "$it pages" }).joinToString(" · ").ifEmpty { null },
             thumbnailUrl = "$base/api/v1/books/$bookId/thumbnail",
+            onlineBookId = bookId,
             files = listOf(RemoteFile(fileName, "$base/api/v1/books/$bookId/file", format, o["sizeBytes"].text()?.toLongOrNull())),
           )
         }

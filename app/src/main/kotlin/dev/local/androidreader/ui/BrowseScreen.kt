@@ -68,6 +68,7 @@ fun BrowseContent(
   onLoadMore: () -> Unit,
   onGoUp: () -> Unit,
   onDownload: (CatalogEntry, RemoteFile) -> Unit,
+  onReadOnline: (CatalogEntry) -> Unit,
   onDismissDetail: () -> Unit,
   onAddOpds: (OpdsConfig) -> Unit,
   onAddKomga: (KomgaConfig) -> Unit,
@@ -160,7 +161,7 @@ fun BrowseContent(
                   ListItem(
                     headlineContent = { Text(file.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     supportingContent = {
-                      Text(listOfNotNull(file.format.name, file.sizeBytes?.let(::formatSize)).joinToString(" · "))
+                      Text(listOfNotNull("Download", file.format.name, file.sizeBytes?.let(::formatSize)).joinToString(" · "))
                     },
                     modifier = Modifier.clickable { onDownload(detail.entry, file) },
                   )
@@ -169,7 +170,22 @@ fun BrowseContent(
           }
         }
       },
-      confirmButton = { TextButton(onClick = onDismissDetail) { Text("Close") } },
+      // Reading online is offered first where the server supports it; the files above still download.
+      confirmButton = {
+        if (detail.entry.onlineBookId != null) {
+          TextButton(
+            onClick = {
+              onDismissDetail()
+              onReadOnline(detail.entry)
+            }
+          ) {
+            Text("Read online")
+          }
+        } else {
+          TextButton(onClick = onDismissDetail) { Text("Close") }
+        }
+      },
+      dismissButton = if (detail.entry.onlineBookId != null) ({ TextButton(onClick = onDismissDetail) { Text("Close") } }) else null,
     )
   }
 
@@ -342,7 +358,7 @@ fun BrowseContentPreview() {
         sources = listOf(SourceInfo("ia", "Internet Archive", false), SourceInfo("opds:x", "Home server", true)),
         entries = entries,
       ),
-      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {},
+      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {},
     )
   }
 }
@@ -350,7 +366,7 @@ fun BrowseContentPreview() {
 @Preview(showBackground = true, widthDp = 380, heightDp = 640)
 @Composable
 fun BrowseDetailPreview() {
-  val entry = CatalogEntry("ia", "a", "Planet Stories v1 #1")
+  val entry = CatalogEntry("ia", "a", "Planet Stories v1 #1", onlineBookId = "B1")
   ReaderTheme {
     BrowseContent(
       BrowseUiState(
@@ -365,7 +381,7 @@ fun BrowseDetailPreview() {
             ),
           ),
       ),
-      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {},
+      {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {},
     )
   }
 }
