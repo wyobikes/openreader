@@ -23,10 +23,14 @@ object BookHtml {
    * Reading styles laid over the book's own: comfortable margins and line height, pictures that
    * fit the screen, and for dark mode, light text on a dark page whatever the book specifies.
    */
-  fun css(dark: Boolean): String {
+  fun css(dark: Boolean, topInset: Int = 0, bottomInset: Int = 0): String {
+    // The page fills the whole screen in full-screen reading, so the text itself keeps clear of
+    // the camera cutout at the top and the gesture area at the bottom. Insets are in CSS pixels.
+    val top = "calc(1em + ${topInset.coerceAtLeast(0)}px)"
+    val bottom = "calc(4em + ${bottomInset.coerceAtLeast(0)}px)"
     val base =
       "html{-webkit-text-size-adjust:100%}" +
-        "body{margin:0 auto!important;padding:1em 1.2em 4em!important;max-width:42em;line-height:1.55;overflow-wrap:break-word}" +
+        "body{margin:0 auto!important;padding:$top 1.2em $bottom!important;max-width:42em;line-height:1.55;overflow-wrap:break-word}" +
         "img,svg,video{max-width:100%!important;height:auto!important}" +
         "pre{white-space:pre-wrap}"
     return if (dark) {
