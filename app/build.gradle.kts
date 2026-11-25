@@ -14,8 +14,8 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
 }
 
-// APKs come out as androidreader-<variant>-<build type>.apk.
-base { archivesName = "androidreader" }
+// APKs come out as openreader-<variant>-<build type>.apk.
+base { archivesName = "openreader" }
 
 android {
   namespace = "dev.local.androidreader"
@@ -68,14 +68,14 @@ android {
     create("webview") {
       dimension = "browser"
       applicationIdSuffix = ".webview"
-      resValue("string", "app_name", "Android Reader (WebView)")
+      resValue("string", "app_name", "Open Reader")
     }
     // Firefox's engine (GeckoView) running the real uBlock Origin: much larger.
     create("ublock") {
       dimension = "browser"
       applicationIdSuffix = ".ublock"
       minSdk = 26
-      resValue("string", "app_name", "Android Reader (uBlock)")
+      resValue("string", "app_name", "Open Reader (uBlock)")
       ndk { abiFilters += "arm64-v8a" }
     }
   }

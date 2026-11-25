@@ -20,7 +20,7 @@ import org.mozilla.geckoview.WebResponse
 
 const val ENGINE_LABEL = "Firefox engine · uBlock Origin"
 
-private const val TAG = "AndroidReaderGecko"
+private const val TAG = "OpenReaderGecko"
 private const val UBLOCK_ID = "uBlock0@raymondhill.net"
 private const val UBLOCK_ASSETS = "resource://android/assets/ublock/"
 

@@ -73,6 +73,6 @@ class MainActivity : ComponentActivity() {
     }
     val app = application as ReaderApp
     app.downloads.enqueue(title = url.substringAfterLast('/').substringBefore('?').ifEmpty { url }, url = url)
-    Toast.makeText(this, "Added to Android Reader downloads", Toast.LENGTH_SHORT).show()
+    Toast.makeText(this, "Added to Open Reader downloads", Toast.LENGTH_SHORT).show()
   }
 }

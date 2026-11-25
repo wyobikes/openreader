@@ -126,7 +126,7 @@ fun HomeScreen(
     topBar = {
       if (tab != Tab.WEB) {
         TopAppBar(
-          title = { Text(if (tab == Tab.LIBRARY) "Android Reader" else tab.label) },
+          title = { Text(if (tab == Tab.LIBRARY) "Open Reader" else tab.label) },
           actions = { ThemeMenu(themeMode, onSelect = app.library::setTheme) },
         )
       }
@@ -170,6 +170,7 @@ fun HomeScreen(
           onOpen = onOpenComic,
           onDelete = { app.library.delete(it.file) },
           modifier = modifier,
+          onMove = { comic, toComics -> app.library.moveToShelf(comic.file, toComics) },
           onConvertToEpub = { comic ->
             scope.launch {
               snackbar.showSnackbar("Converting ${comic.title}…", duration = SnackbarDuration.Short)

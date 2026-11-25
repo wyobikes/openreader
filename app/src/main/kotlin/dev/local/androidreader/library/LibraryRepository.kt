@@ -18,6 +18,8 @@ data class ComicState(
   val lastOpened: Long = 0,
   /** For books: how far down the current chapter, from 0 to 1. */
   val scroll: Float = 0f,
+  /** Set when the item was moved by hand: true for Comics, false for Books. Null means by file type. */
+  val onComicsShelf: Boolean? = null,
 )
 
 data class Comic(val file: File, val state: ComicState) {
@@ -30,9 +32,12 @@ data class Comic(val file: File, val state: ComicState) {
   val isStarted: Boolean
     get() = state.lastOpened > 0
 
-  /** Which library tab this belongs on: comic archives are comics, EPUBs and PDFs are books. */
+  /**
+   * Which library tab this belongs on. By default comic archives are comics and EPUBs and PDFs
+   * are books; moving an item by hand overrides that.
+   */
   val isComic: Boolean
-    get() = file.extension.equals("cbz", ignoreCase = true)
+    get() = state.onComicsShelf ?: file.extension.equals("cbz", ignoreCase = true)
 
   /** A text book (EPUB), as opposed to a comic or PDF made of page images. */
   val isBook: Boolean
@@ -136,6 +141,9 @@ class LibraryRepository(val dir: File, private val stateFile: File) {
     persist(saved.copy(comics = saved.comics + (key to next)))
     _comics.update { list -> list.map { if (it.file.name == key) it.copy(state = next) else it } }
   }
+
+  /** Moves an item to the Comics tab or the Books tab. The file itself is not touched. */
+  fun moveToShelf(file: File, comics: Boolean) = updateState(file) { it.copy(onComicsShelf = comics) }
 
   fun state(file: File): ComicState = state(file.name)
 
