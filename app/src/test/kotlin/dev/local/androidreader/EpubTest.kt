@@ -273,6 +273,11 @@ class BookHtmlTest {
     assertTrue(dark.contains("#121212!important") && dark.contains("color:#e3e3e3!important"))
     assertFalse(light.contains("#121212"))
     assertTrue(light.contains("max-width:100%!important") && dark.contains("max-width:100%!important"))
+    // Full-screen reading: the text keeps clear of the camera cutout and the gesture bar.
+    val inset = dev.local.androidreader.epub.BookHtml.css(dark = false, topInset = 32, bottomInset = 16)
+    assertTrue(inset.contains("padding:calc(1em + 32px) 1.2em calc(4em + 16px)!important"))
+    assertTrue(light.contains("padding:calc(1em + 0px) 1.2em calc(4em + 0px)!important"))
+    assertTrue(dev.local.androidreader.epub.BookHtml.css(true, topInset = -5).contains("calc(1em + 0px)"))
     assertTrue(dev.local.androidreader.epub.BookHtml.isChapterType("application/xhtml+xml"))
     assertFalse(dev.local.androidreader.epub.BookHtml.isChapterType("image/png"))
   }

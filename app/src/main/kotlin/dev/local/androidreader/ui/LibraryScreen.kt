@@ -17,12 +17,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,11 +50,23 @@ fun LibraryContent(
   onConvertToEpub: (Comic) -> Unit = {},
 ) {
   var pendingDelete by remember { mutableStateOf<Comic?>(null) }
+  val books = remember(comics) { comics.filterNot { it.isComic } }
+  val comicsOnly = remember(comics) { comics.filter { it.isComic } }
+  // Open on whichever shelf has something on it.
+  var tab by rememberSaveable { mutableIntStateOf(if (books.isEmpty() && comicsOnly.isNotEmpty()) 1 else 0) }
+  val shown = if (tab == 0) books else comicsOnly
 
-  if (comics.isEmpty()) {
-    Box(modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+  Column(modifier.fillMaxSize()) {
+  PrimaryTabRow(selectedTabIndex = tab) {
+    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(if (books.isEmpty()) "Books" else "Books (${books.size})") })
+    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(if (comicsOnly.isEmpty()) "Comics" else "Comics (${comicsOnly.size})") })
+  }
+
+  if (shown.isEmpty()) {
+    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
       Text(
-        "Nothing here yet.\nFind comics and books in Catalogues, paste a link in Downloads, or tap + to import files from this device.",
+        (if (tab == 0) "No books yet.\nEPUB and PDF files appear here." else "No comics yet.\nCBZ and CBR files appear here.") +
+          "\n\nFind some in Catalogues, paste a link in Downloads, or tap + to import files from this device.",
         textAlign = TextAlign.Center,
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -59,12 +75,12 @@ fun LibraryContent(
   } else {
     LazyVerticalGrid(
       columns = GridCells.Adaptive(minSize = 108.dp),
-      modifier = modifier.fillMaxSize(),
+      modifier = Modifier.fillMaxSize(),
       contentPadding = PaddingValues(12.dp),
       horizontalArrangement = Arrangement.spacedBy(12.dp),
       verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-      items(comics, key = { it.file.path }) { comic ->
+      items(shown, key = { it.file.path }) { comic ->
         Column(
           Modifier.clip(RoundedCornerShape(8.dp))
             .combinedClickable(onClick = { onOpen(comic) }, onLongClick = { pendingDelete = comic })
@@ -101,6 +117,8 @@ fun LibraryContent(
         }
       }
     }
+  }
+
   }
 
   // Long press: what can be done with this item.
@@ -150,7 +168,8 @@ fun LibraryContentPreview() {
       Comic(File("/x/Planet Stories 01.cbz"), ComicState(lastPage = 12, pageCount = 36, lastOpened = 1)),
       Comic(File("/x/Planet Stories 02.cbz"), ComicState()),
       Comic(File("/x/Amazing Mystery Funnies v2 07.cbz"), ComicState(lastPage = 51, pageCount = 52, lastOpened = 1)),
-      Comic(File("/x/Wonderworld Comics 03.pdf"), ComicState()),
+      Comic(File("/x/Wonderworld Comics 03.cbz"), ComicState()),
+      Comic(File("/x/A Princess of Mars.epub"), ComicState(lastPage = 3, pageCount = 28, lastOpened = 1)),
     )
   ReaderTheme { LibraryContent(comics, onOpen = {}, onDelete = {}) }
 }

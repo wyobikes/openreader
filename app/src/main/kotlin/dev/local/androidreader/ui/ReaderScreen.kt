@@ -63,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -206,19 +207,20 @@ private tailrec fun Context.findActivity(): Activity? =
 // The cutout mode written back on leaving is the value read from the same field on entering.
 @SuppressLint("WrongConstant")
 @Composable
-private fun ReaderWindow(fullScreen: Boolean) {
+internal fun ReaderWindow(fullScreen: Boolean, lightBackground: Boolean = false) {
   val view = LocalView.current
   val window = remember(view) { view.context.findActivity()?.window } ?: return
 
-  DisposableEffect(window) {
+  DisposableEffect(window, lightBackground) {
     val controller = WindowCompat.getInsetsController(window, view)
     val lightStatus = controller.isAppearanceLightStatusBars
     val lightNavigation = controller.isAppearanceLightNavigationBars
     val cutoutMode = if (Build.VERSION.SDK_INT >= 28) window.attributes.layoutInDisplayCutoutMode else 0
 
-    // The reader is black, so the bars need light icons whatever the app theme is.
-    controller.isAppearanceLightStatusBars = false
-    controller.isAppearanceLightNavigationBars = false
+    // The bar icons must contrast with the page behind them, whatever the app theme is: light
+    // icons over the black comic reader, dark icons over a light book page.
+    controller.isAppearanceLightStatusBars = lightBackground
+    controller.isAppearanceLightNavigationBars = lightBackground
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     if (Build.VERSION.SDK_INT >= 28) {
       // Without this the system letterboxes the window when the status bar hides, and the page jumps.
@@ -298,6 +300,17 @@ private fun Pages(
       onEdgeTap = { leftEdge -> turn(if (leftEdge != rightToLeft) -1 else 1) },
       onCentreTap = onToggleControls,
     )
+  }
+
+  // A small page number stays visible while reading, as in most comic readers.
+  if (!showControls) {
+    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout).padding(bottom = 6.dp), contentAlignment = Alignment.BottomCenter) {
+      Text(
+        "${pagerState.currentPage + 1} / ${pages.pageCount}",
+        color = Color.White.copy(alpha = 0.75f),
+        style = MaterialTheme.typography.labelSmall.copy(shadow = Shadow(Color.Black, blurRadius = 6f)),
+      )
+    }
   }
 
   AnimatedVisibility(showControls, enter = fadeIn(tween(150)), exit = fadeOut(tween(150))) {

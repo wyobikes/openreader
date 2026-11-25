@@ -30,6 +30,10 @@ data class Comic(val file: File, val state: ComicState) {
   val isStarted: Boolean
     get() = state.lastOpened > 0
 
+  /** Which library tab this belongs on: comic archives are comics, EPUBs and PDFs are books. */
+  val isComic: Boolean
+    get() = file.extension.equals("cbz", ignoreCase = true)
+
   /** A text book (EPUB), as opposed to a comic or PDF made of page images. */
   val isBook: Boolean
     get() = file.extension.equals("epub", ignoreCase = true)
