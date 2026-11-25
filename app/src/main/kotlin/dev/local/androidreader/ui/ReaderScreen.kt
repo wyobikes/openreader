@@ -43,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -326,14 +327,23 @@ private fun Pages(
         if (pages.pageCount > 1) {
           // The slider runs the same way the pages do.
           CompositionLocalProvider(LocalLayoutDirection provides if (rightToLeft) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+            val sliderState =
+              // Arguments: starting value, number of discrete steps (0 = continuous), range.
+              remember(pages.pageCount) { SliderState(pagerState.currentPage.toFloat(), 0, 0f..(pages.pageCount - 1).toFloat()) }
+            // The thumb follows the pages, except while it is being dragged.
+            LaunchedEffect(pagerState.currentPage, dragging) {
+              if (dragging == null) sliderState.value = pagerState.currentPage.toFloat()
+            }
             Slider(
-              value = dragging ?: pagerState.currentPage.toFloat(),
-              onValueChange = { dragging = it },
+              state = sliderState,
+              onValueChange = {
+                dragging = it
+                sliderState.value = it
+              },
               onValueChangeFinished = {
                 dragging?.let { target -> scope.launch { pagerState.scrollToPage(target.roundToInt()) } }
                 dragging = null
               },
-              valueRange = 0f..(pages.pageCount - 1).toFloat(),
             )
           }
         }

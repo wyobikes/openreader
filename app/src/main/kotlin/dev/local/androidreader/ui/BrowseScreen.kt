@@ -1,6 +1,5 @@
 package dev.local.androidreader.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
@@ -32,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,12 +42,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -58,6 +59,7 @@ import dev.local.androidreader.source.RemoteFile
 import dev.local.androidreader.source.ServerCheck
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import dev.local.androidreader.ui.theme.ReaderTheme
+import kotlinx.coroutines.flow.drop
 
 @Composable
 fun BrowseContent(
@@ -115,7 +117,7 @@ fun BrowseContent(
     LazyColumn(Modifier.fillMaxSize()) {
       items(state.entries, key = { it.id }) { entry ->
         ListItem(
-          headlineContent = { Text(entry.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+          onClick = { onOpen(entry) },
           supportingContent = entry.subtitle?.let { { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
           leadingContent = {
             RemoteThumbnail(
@@ -126,8 +128,9 @@ fun BrowseContent(
             )
           },
           trailingContent = if (entry.isFolder) ({ Text("›", style = MaterialTheme.typography.titleLarge) }) else null,
-          modifier = Modifier.clickable { onOpen(entry) },
-        )
+        ) {
+          Text(entry.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
       }
       item(key = "footer") {
         Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -159,12 +162,13 @@ fun BrowseContent(
               LazyColumn {
                 items(detail.files) { file ->
                   ListItem(
-                    headlineContent = { Text(file.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    onClick = { onDownload(detail.entry, file) },
                     supportingContent = {
                       Text(listOfNotNull("Download", file.format.name, file.sizeBytes?.let(::formatSize)).joinToString(" · "))
                     },
-                    modifier = Modifier.clickable { onDownload(detail.entry, file) },
-                  )
+                  ) {
+                    Text(file.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                  }
                 }
               }
           }
@@ -231,8 +235,15 @@ internal fun AddCatalogDialog(
   var name by rememberSaveable { mutableStateOf("") }
   var url by rememberSaveable { mutableStateOf("") }
   var username by rememberSaveable { mutableStateOf("") }
-  var password by rememberSaveable { mutableStateOf("") }
-  var apiKey by rememberSaveable { mutableStateOf("") }
+  // Secret fields keep their text in a state object, as the secure text field requires.
+  val passwordState = rememberTextFieldState()
+  val apiKeyState = rememberTextFieldState()
+  val password = passwordState.text.toString()
+  val apiKey = apiKeyState.text.toString()
+  // Changing either secret invalidates a passed connection test, like any other detail.
+  LaunchedEffect(passwordState, apiKeyState) {
+    snapshotFlow { passwordState.text.toString() to apiKeyState.text.toString() }.drop(1).collect { onEdited() }
+  }
   val trimmedUrl = url.trim()
   val validUrl = (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) && trimmedUrl.toHttpUrlOrNull() != null
   val label = name.trim().ifEmpty { trimmedUrl.substringAfter("://").substringBefore('/') }
@@ -284,29 +295,9 @@ internal fun AddCatalogDialog(
           label = { Text(if (komga) "Email" else "Username (optional)") },
           singleLine = true,
         )
-        OutlinedTextField(
-          password,
-          {
-            password = it
-            onEdited()
-          },
-          label = { Text(if (komga) "Password" else "Password (optional)") },
-          singleLine = true,
-          visualTransformation = PasswordVisualTransformation(),
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        )
+        OutlinedSecureTextField(state = passwordState, label = { Text(if (komga) "Password" else "Password (optional)") })
         if (komga) {
-          OutlinedTextField(
-            apiKey,
-            {
-              apiKey = it
-              onEdited()
-            },
-            label = { Text("API key (instead of email and password)") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-          )
+          OutlinedSecureTextField(state = apiKeyState, label = { Text("API key (instead of email and password)") })
         }
 
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

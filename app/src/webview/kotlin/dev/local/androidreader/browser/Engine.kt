@@ -19,6 +19,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.net.toUri
 import dev.local.androidreader.ReaderApp
 import dev.local.androidreader.download.Downloader
 import java.io.ByteArrayInputStream
@@ -84,7 +85,7 @@ fun BrowserEngineView(state: BrowserState, onDownload: (DownloadRequest) -> Unit
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-              pageHost = runCatching { android.net.Uri.parse(url).host }.getOrNull()
+              pageHost = runCatching { url.toUri().host }.getOrNull()
               state.url = url
               state.loading = true
               state.blocked = 0

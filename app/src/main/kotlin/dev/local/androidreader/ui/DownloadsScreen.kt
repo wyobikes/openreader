@@ -116,7 +116,6 @@ fun DownloadsContent(
       items(items, key = { it.id }) { item ->
         val active = item.status == DownloadItem.Status.RUNNING || item.status == DownloadItem.Status.QUEUED
         ListItem(
-          headlineContent = { Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
           supportingContent = {
             Column {
               Text(
@@ -146,7 +145,9 @@ fun DownloadsContent(
           trailingContent =
             if (active) ({ IconButton(onClick = { onCancel(item.id) }) { Icon(Icons.Default.Close, contentDescription = "Cancel download") } })
             else null,
-        )
+        ) {
+          Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
       }
     }
   }

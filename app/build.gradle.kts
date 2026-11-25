@@ -19,7 +19,11 @@ base { archivesName = "androidreader" }
 
 android {
   namespace = "dev.local.androidreader"
-  compileSdk = 37
+  // Compiled against Android 17's second minor release, which the current UI libraries require.
+  // This does not affect which phones the app runs on (see minSdk).
+  compileSdk {
+    version = release(37) { minorApiLevel = 2 }
+  }
   defaultConfig {
     applicationId = "dev.local.androidreader"
     minSdk = 24
@@ -74,6 +78,11 @@ android {
       resValue("string", "app_name", "Android Reader (uBlock)")
       ndk { abiFilters += "arm64-v8a" }
     }
+  }
+
+  lint {
+    // Narrow, documented exceptions live in lint.xml; everything else is reported.
+    lintConfig = file("lint.xml")
   }
 
   buildFeatures {

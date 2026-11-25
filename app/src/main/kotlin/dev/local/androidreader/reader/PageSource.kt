@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import androidx.core.graphics.createBitmap
 import dev.local.androidreader.epub.EpubBook
 import dev.local.androidreader.library.Importer
 import dev.local.androidreader.library.NaturalOrder
@@ -72,12 +73,7 @@ class PdfPages(file: File) : PageSource {
   override fun decode(index: Int, maxSide: Int): Bitmap =
     renderer.openPage(index).use { page ->
       val scale = maxSide.toFloat() / maxOf(page.width, page.height)
-      val bitmap =
-        Bitmap.createBitmap(
-          (page.width * scale).toInt().coerceAtLeast(1),
-          (page.height * scale).toInt().coerceAtLeast(1),
-          Bitmap.Config.ARGB_8888,
-        )
+      val bitmap = createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1))
       bitmap.eraseColor(Color.WHITE)
       page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
       bitmap

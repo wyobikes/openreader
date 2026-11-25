@@ -1,5 +1,6 @@
 package dev.local.androidreader.download
 
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -141,7 +142,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
     // Sign-in details for the catalogue the file came from, plus anything the browser passed along.
     val headers =
       app.sources().firstOrNull { it.id == sourceId }?.requestHeaders.orEmpty() +
-        inputData.getStringArray(DownloadQueue.KEY_HEADERS).orEmpty().associate {
+        inputData.getNullableStringArray(DownloadQueue.KEY_HEADERS).orEmpty().filterNotNull().associate {
           it.substringBefore(": ") to it.substringAfter(": ")
         }
 
@@ -199,6 +200,9 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
 
   private fun fail(message: String): Result = Result.failure(workDataOf(DownloadQueue.KEY_ERROR to message))
 
+  // The version checks below are needed on Android 7, which the WebView variant supports; the
+  // uBlock variant needs Android 8 and would otherwise report them as unnecessary.
+  @SuppressLint("ObsoleteSdkInt")
   private fun foregroundInfo(title: String, done: Long, total: Long): ForegroundInfo {
     val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
