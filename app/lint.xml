@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!--
+      The PDF text library (pdfbox-android) bundles Bouncy Castle, which contains a certificate
+      checker that accepts everything. This app never uses it: all network connections go through
+      OkHttp with the platform's normal certificate checks. Ignored for that one library only, so
+      the check still applies to this project's own code and to every other dependency.
+    -->
+    <issue id="TrustAllX509TrustManager">
+        <ignore regexp="org\.bouncycastle" />
+    </issue>
+
+    <!--
+      The uBlock variant ships Firefox's engine for 64-bit ARM phones only; adding x86_64 for
+      Chromebooks would roughly double a 220 MB APK. ChromeOS is not a target for this app.
+    -->
+    <issue id="ChromeOsAbiSupport" severity="ignore" />
+
+    <!--
+      The WebView variant supports Android 7, which has no adaptive icons, so the adaptive icon
+      sits in a "v26" folder with a plain fallback beside it. The uBlock variant needs Android 8
+      and so reports that folder as unnecessary; it is needed by the other variant.
+    -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>

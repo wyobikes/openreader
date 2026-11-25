@@ -7,7 +7,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +36,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -100,7 +100,7 @@ fun BookReaderScreen(path: String, onBack: () -> Unit) {
       var textZoom by rememberSaveable { mutableIntStateOf(app.library.bookTextZoom) }
       var showContents by remember { mutableStateOf(false) }
       // How far down the section the reader is, 0 to 1; restored once, when the book opens.
-      var scroll by remember { mutableStateOf(if (section == saved.lastPage) saved.scroll else 0f) }
+      var scroll by remember { mutableFloatStateOf(if (section == saved.lastPage) saved.scroll else 0f) }
 
       fun save() =
         app.library.updateState(file) {
@@ -207,22 +207,20 @@ fun BookReaderScreen(path: String, onBack: () -> Unit) {
             LazyColumn(state = listState) {
               itemsIndexed(book.chapters) { index, chapter ->
                 ListItem(
-                  headlineContent = {
-                    Text(
-                      chapter.title,
-                      maxLines = 2,
-                      overflow = TextOverflow.Ellipsis,
-                      fontWeight = if (index == section) FontWeight.Bold else FontWeight.Normal,
-                    )
+                  onClick = {
+                    scroll = 0f
+                    section = index
+                    showContents = false
                   },
                   colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                  modifier =
-                    Modifier.clickable {
-                      scroll = 0f
-                      section = index
-                      showContents = false
-                    },
-                )
+                ) {
+                  Text(
+                    chapter.title,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = if (index == section) FontWeight.Bold else FontWeight.Normal,
+                  )
+                }
               }
             }
           },
@@ -254,7 +252,7 @@ private fun BookPage(
   val css = remember(dark) { BookHtml.css(dark) }
   // What the view is showing, so that following a link inside the book does not trigger a reload.
   val shown = remember { mutableStateOf<String?>(null) }
-  val pendingScroll = remember { mutableStateOf(startScroll) }
+  val pendingScroll = remember { mutableFloatStateOf(startScroll) }
   val currentOnSection = androidx.compose.runtime.rememberUpdatedState(onSection)
   val currentOnScroll = androidx.compose.runtime.rememberUpdatedState(onScroll)
 
@@ -292,8 +290,8 @@ private fun BookPage(
             }
 
             override fun onPageFinished(view: WebView, url: String) {
-              val fraction = pendingScroll.value
-              pendingScroll.value = 0f
+              val fraction = pendingScroll.floatValue
+              pendingScroll.floatValue = 0f
               if (fraction <= 0f) return
               // Wait until the text is laid out, or there is no height to scroll within yet.
               view.postVisualStateCallback(
