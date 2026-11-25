@@ -19,3 +19,24 @@ local.properties
 keystore.properties
 *.jks
 *.keystore
+
+# Machine-specific settings: local.properties holds the SDK path, which includes the user name
+/.idea/
+*.log
+
+# Other credentials and private keys
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+google-services.json
+
+# Built apps are published as releases, not committed
+*.apk
+*.aab
+/builds/
+
+# App data copied off a device for debugging (contains saved server sign-ins)
+library.json
