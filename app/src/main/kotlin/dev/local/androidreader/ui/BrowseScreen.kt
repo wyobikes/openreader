@@ -301,7 +301,7 @@ internal fun AddCatalogDialog(
         )
         OutlinedSecureTextField(state = passwordState, label = { Text(if (komga) "Password" else "Password (optional)") })
         if (komga) {
-          OutlinedSecureTextField(state = apiKeyState, label = { Text("API key (instead of email and password)") })
+          OutlinedSecureTextField(state = apiKeyState, label = { Text("API Key (optional)") })
         }
 
         // A sign-in sent over plain http can be read by anyone on the same network.
