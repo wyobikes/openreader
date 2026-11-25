@@ -26,6 +26,9 @@ class OpdsSource(private val client: OkHttpClient, private val config: OpdsConfi
   override val name = config.name
   override val supportsSearch = true
 
+  override val baseUrl: String
+    get() = config.url
+
   private var searchTemplate: String? = null
 
   override val requestHeaders: Map<String, String>
@@ -35,7 +38,7 @@ class OpdsSource(private val client: OkHttpClient, private val config: OpdsConfi
 
   override suspend fun browse(location: String?): CatalogPage {
     val url = location ?: config.url
-    val feed = parseFeed(client.getText(url, requestHeaders), url, id)
+    val feed = parseFeed(client.getText(url, headersFor(url)), url, id)
     feed.searchUrl?.let { searchTemplate = resolveSearchTemplate(it) }
     return feed.page
   }
@@ -53,7 +56,7 @@ class OpdsSource(private val client: OkHttpClient, private val config: OpdsConfi
   private suspend fun resolveSearchTemplate(url: String): String? {
     if ("{searchTerms" in url) return url
     return runCatching {
-        val doc = parseXml(client.getText(url, requestHeaders))
+        val doc = parseXml(client.getText(url, headersFor(url)))
         doc.elements("Url")
           .firstOrNull { it.getAttribute("type").contains("atom") }
           ?.getAttribute("template")

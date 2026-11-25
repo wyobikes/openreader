@@ -21,7 +21,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
 import dev.local.androidreader.ReaderApp
+import dev.local.androidreader.download.DownloadHeaders
 import dev.local.androidreader.download.Downloader
+import dev.local.androidreader.ui.denyLocalAccess
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.ByteArrayInputStream
 import java.io.File
 
@@ -48,6 +51,8 @@ fun BrowserEngineView(state: BrowserState, onDownload: (DownloadRequest) -> Unit
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
+        // Web pages get no access to files or other apps' data on the phone.
+        settings.denyLocalAccess()
         settings.builtInZoomControls = true
         settings.displayZoomControls = false
         settings.useWideViewPort = true
@@ -113,16 +118,20 @@ fun BrowserEngineView(state: BrowserState, onDownload: (DownloadRequest) -> Unit
             override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean = false
           }
 
-        setDownloadListener { url, userAgent, contentDisposition, _, _ ->
-          if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        setDownloadListener { rawUrl, userAgent, contentDisposition, _, _ ->
+          // The address comes from the page, so it is parsed strictly here, and the parsed form
+          // is the only one used from this point on.
+          val url = rawUrl.toHttpUrlOrNull()?.toString()
+          if (url == null) {
             Toast.makeText(context, "This kind of download is not supported", Toast.LENGTH_LONG).show()
             return@setDownloadListener
           }
           val headers =
             buildMap {
               userAgent?.let { put("User-Agent", it) }
+              // Cookies for this address only; they are dropped if the download is redirected elsewhere.
               CookieManager.getInstance().getCookie(url)?.let { put("Cookie", it) }
-              put("Referer", state.url)
+              DownloadHeaders.referer(state.url, url)?.let { put("Referer", it) }
             }
           currentOnDownload(DownloadRequest(url, Downloader.fileNameFromContentDisposition(contentDisposition), headers))
         }

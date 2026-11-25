@@ -10,11 +10,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.local.androidreader.library.ThemeMode
 import dev.local.androidreader.ui.theme.ReaderTheme
@@ -46,6 +52,24 @@ class MainActivity : ComponentActivity() {
       }
       ReaderTheme(darkTheme = dark) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { MainNavigation() }
+        sharedLink?.let { link ->
+          AlertDialog(
+            onDismissRequest = { sharedLink = null },
+            title = { Text("Download this link?") },
+            text = { Text(link, maxLines = 6, overflow = TextOverflow.Ellipsis) },
+            confirmButton = {
+              TextButton(
+                onClick = {
+                  download(link)
+                  sharedLink = null
+                }
+              ) {
+                Text("Download")
+              }
+            },
+            dismissButton = { TextButton(onClick = { sharedLink = null }) { Text("Cancel") } },
+          )
+        }
       }
     }
   }
@@ -61,7 +85,10 @@ class MainActivity : ComponentActivity() {
     val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
   }
 
-  /** A link shared from another app is queued as a download. */
+  /** A link shared from another app, waiting for the user to approve the download. */
+  private var sharedLink by mutableStateOf<String?>(null)
+
+  /** A link shared from another app is offered as a download. */
   private fun handleShare(intent: Intent?) {
     if (intent?.action != Intent.ACTION_SEND) return
     val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
@@ -71,6 +98,11 @@ class MainActivity : ComponentActivity() {
       Toast.makeText(this, "No link found in the shared text", Toast.LENGTH_LONG).show()
       return
     }
+    // Another app chose this link, so it is shown for approval instead of being fetched at once.
+    sharedLink = url
+  }
+
+  private fun download(url: String) {
     val app = application as ReaderApp
     app.downloads.enqueue(title = url.substringAfterLast('/').substringBefore('?').ifEmpty { url }, url = url)
     Toast.makeText(this, "Added to Open Reader downloads", Toast.LENGTH_SHORT).show()

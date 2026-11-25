@@ -29,6 +29,10 @@ class EpubBook private constructor(
 
   fun open(path: String): InputStream? = zip.getEntry(path)?.takeIf { !it.isDirectory }?.let(zip::getInputStream)
 
+  /** One section's text, for styling before display, or null if it is too large to hold in memory. */
+  fun readSection(path: String): ByteArray? =
+    open(path)?.use { stream -> runCatching { readLimited(stream, MAX_SECTION_BYTES) }.getOrNull() }
+
   fun mediaType(path: String): String =
     mediaTypes[path]
       ?: when (path.substringAfterLast('.').lowercase()) {
@@ -62,9 +66,12 @@ class EpubBook private constructor(
     }
 
     private fun read(zip: ZipFile, fallbackTitle: String): EpubBook {
-      fun text(path: String): String =
-        zip.getEntry(path)?.let { zip.getInputStream(it).use { s -> s.readBytes().toString(Charsets.UTF_8) } }
-          ?: throw IOException("This EPUB is missing $path")
+      // These small index files are read into memory whole, so a book cannot be allowed to
+      // present one that expands without end.
+      fun text(path: String): String {
+        val entry = zip.getEntry(path) ?: throw IOException("This EPUB is missing $path")
+        return zip.getInputStream(entry).use { s -> readLimited(s, MAX_INDEX_BYTES).toString(Charsets.UTF_8) }
+      }
 
       val container = parseXml(text("META-INF/container.xml"))
       val opfPath =
@@ -112,6 +119,21 @@ class EpubBook private constructor(
           ?: opf.descendants("meta").firstOrNull { it.getAttribute("name") == "cover" }?.getAttribute("content")?.let { items[it]?.path }
       val chapters = order.mapIndexed { i, path -> Chapter(path, names[path]?.takeIf { it.isNotEmpty() } ?: "Section ${i + 1}") }
       return EpubBook(zip, title, chapters, cover?.takeIf { zip.getEntry(it) != null }, items.values.associate { it.path to it.type })
+    }
+
+    const val MAX_INDEX_BYTES = 16 * 1024 * 1024
+    const val MAX_SECTION_BYTES = 32 * 1024 * 1024
+
+    /** Reads a stream fully, failing instead of growing past [limit] bytes. */
+    fun readLimited(stream: InputStream, limit: Int): ByteArray {
+      val out = java.io.ByteArrayOutputStream()
+      val buffer = ByteArray(64 * 1024)
+      while (true) {
+        val read = stream.read(buffer)
+        if (read < 0) return out.toByteArray()
+        if (out.size() + read > limit) throw IOException("This part of the book is too large to open")
+        out.write(buffer, 0, read)
+      }
     }
 
     /** Resolves a link found in [fromPath] to a path inside the archive, without its #fragment. */

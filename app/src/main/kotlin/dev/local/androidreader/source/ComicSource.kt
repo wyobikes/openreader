@@ -76,9 +76,23 @@ interface ComicSource {
   val name: String
   val supportsSearch: Boolean
 
-  /** Headers (sign-in details) that requests to this source need, including thumbnails and downloads. */
+  /** The server this source talks to, or null for a source with no sign-in. */
+  val baseUrl: String?
+    get() = null
+
+  /**
+   * The sign-in for this source's server. Do not attach it to a request directly: use
+   * [headersFor], which withholds it from any other server.
+   */
   val requestHeaders: Map<String, String>
     get() = emptyMap()
+
+  /**
+   * The headers to send to [url]: the sign-in when that address is on this source's own server,
+   * and nothing otherwise. Covers, files and links named by a catalogue can be hosted anywhere.
+   */
+  fun headersFor(url: String): Map<String, String> =
+    if (ServerOrigin.sameServer(baseUrl, url)) requestHeaders else emptyMap()
 
   /** Lists a catalogue page. `null` is the source's start page. */
   suspend fun browse(location: String? = null): CatalogPage

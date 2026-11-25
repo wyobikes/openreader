@@ -48,6 +48,9 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
 
   private val base = config.url.trimEnd('/')
 
+  override val baseUrl: String
+    get() = base
+
   override val requestHeaders: Map<String, String>
     get() =
       when {
@@ -57,7 +60,7 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
       }
 
   override suspend fun browse(location: String?): CatalogPage {
-    if (location == null) return parseLibraries(client.getText("$base/api/v1/libraries", requestHeaders), id)
+    if (location == null) return parseLibraries(client.getText("$base/api/v1/libraries", headersFor(base)), id)
     val (kind, target, page) = decodeLocation(location)
     return when (kind) {
       LIBRARY -> parseSeries(post("series/list", page, "metadata.titleSort,asc", condition("libraryId", target)), location)
@@ -76,7 +79,7 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
    * are fetched as they are turned to and cached under [cacheRoot].
    */
   suspend fun openBook(bookId: String, cacheRoot: File): PageSource {
-    val pageCount = parsePageCount(client.getText("$base/api/v1/books/$bookId/pages", requestHeaders))
+    val pageCount = parsePageCount(client.getText("$base/api/v1/books/$bookId/pages", headersFor(base)))
     if (pageCount == 0) throw IOException("The server lists no pages for this book")
     val dir = File(cacheRoot, RemotePageStore.folderName("$id|$bookId"))
     withContext(Dispatchers.IO) {
@@ -85,7 +88,7 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
       // Marks the book as recently read, so it is the last to be cleared from the cache.
       dir.setLastModified(System.currentTimeMillis())
     }
-    return RemotePages(pageCount, RemotePageStore(client, requestHeaders, dir) { index, fallback -> pageUrl(base, bookId, index, fallback) })
+    return RemotePages(pageCount, RemotePageStore(client, headersFor(base), dir) { index, fallback -> pageUrl(base, bookId, index, fallback) })
   }
 
   private fun parseSeries(body: String, location: String) = parseSeries(body, location, id, base)
@@ -102,7 +105,7 @@ class KomgaSource(private val client: OkHttpClient, private val config: KomgaCon
           .build()
       val request =
         Request.Builder().url(url)
-          .apply { requestHeaders.forEach { (k, v) -> header(k, v) } }
+          .apply { headersFor(url.toString()).forEach { (k, v) -> header(k, v) } }
           .post(body.toString().toRequestBody("application/json".toMediaType()))
           .build()
       client.newCall(request).execute().use { response ->

@@ -3,7 +3,9 @@ package dev.local.androidreader.library
 import com.github.junrar.Archive
 import dev.local.androidreader.source.ComicFormat
 import java.io.File
+import java.io.FilterOutputStream
 import java.io.IOException
+import java.io.OutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -39,17 +41,66 @@ object Importer {
   }
 
   /**
+   * Ceilings on what unpacking an archive may write. A small archive can be built to expand into
+   * an enormous amount of data; without a ceiling, importing one would fill the phone's storage.
+   * The defaults are far above any real comic or book.
+   */
+  data class Limits(
+    val maxEntryBytes: Long = 2L * 1024 * 1024 * 1024,
+    val maxTotalBytes: Long = 8L * 1024 * 1024 * 1024,
+    val maxEntries: Int = 50_000,
+  )
+
+  /** Counts down what one import may still write, across everything it unpacks. */
+  private class Budget(val limits: Limits) {
+    private var remaining = limits.maxTotalBytes
+
+    fun checkEntries(count: Int) {
+      if (count > limits.maxEntries) throw IOException("This archive has too many files to unpack safely ($count)")
+    }
+
+    /** An output stream that refuses to grow past the per-file and overall ceilings. */
+    fun limit(out: OutputStream): OutputStream =
+      object : OutputStream() {
+        private var entry = 0L
+
+        private fun spend(bytes: Int) {
+          entry += bytes
+          remaining -= bytes
+          if (entry > limits.maxEntryBytes || remaining < 0) throw IOException("This archive is too large to unpack safely")
+        }
+
+        override fun write(b: Int) {
+          spend(1)
+          out.write(b)
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+          spend(len)
+          out.write(b, off, len)
+        }
+
+        override fun flush() = out.flush()
+
+        override fun close() = out.close()
+      }
+  }
+
+  /**
    * Imports [file] into [libraryDir] under [displayName] (extension is replaced as needed) and
    * deletes [file]. Returns the library files created.
    */
-  fun import(file: File, libraryDir: File, displayName: String, depth: Int = 0): List<File> {
+  fun import(file: File, libraryDir: File, displayName: String, limits: Limits = Limits()): List<File> =
+    import(file, libraryDir, displayName, depth = 0, budget = Budget(limits))
+
+  private fun import(file: File, libraryDir: File, displayName: String, depth: Int, budget: Budget): List<File> {
     libraryDir.mkdirs()
     val title = stripExtension(displayName)
     try {
       return when (sniff(file)) {
         ComicFormat.PDF -> listOf(moveInto(file, libraryDir, "$title.pdf"))
-        ComicFormat.ZIP -> importZip(file, libraryDir, title, depth)
-        ComicFormat.CBR -> importRar(file, libraryDir, title, depth)
+        ComicFormat.ZIP -> importZip(file, libraryDir, title, depth, budget)
+        ComicFormat.CBR -> importRar(file, libraryDir, title, depth, budget)
         else -> throw IOException("\"$displayName\" is not a CBZ, CBR, ZIP, PDF or EPUB file")
       }
     } finally {
@@ -57,46 +108,54 @@ object Importer {
     }
   }
 
-  private fun importZip(file: File, libraryDir: File, title: String, depth: Int): List<File> {
+  private fun importZip(file: File, libraryDir: File, title: String, depth: Int, budget: Budget): List<File> {
     var isEpub = false
-    val (bundled, images) =
-      ZipFile(file).use { zip ->
-        val names = zip.entries().asSequence().filter { !it.isDirectory }.map { it.name }.toList()
-        val bundledNames = names.filter(::isComicFile)
-        // An EPUB is itself a zip; this file is what marks one.
-        if (names.any { it == "META-INF/container.xml" }) {
-          isEpub = true
-          emptyList<Pair<File, String>>() to 0
-        } else if (bundledNames.isNotEmpty() && depth == 0) {
-          val extracted =
-            bundledNames.map { name ->
+    val extracted = ArrayList<Pair<File, String>>()
+    val images =
+      try {
+        ZipFile(file).use { zip ->
+          val names = zip.entries().asSequence().filter { !it.isDirectory }.map { it.name }.toList()
+          budget.checkEntries(names.size)
+          val bundledNames = names.filter(::isComicFile)
+          // An EPUB is itself a zip; this file is what marks one.
+          if (names.any { it == "META-INF/container.xml" }) {
+            isEpub = true
+            0
+          } else if (bundledNames.isNotEmpty() && depth == 0) {
+            for (name in bundledNames) {
               val temp = File.createTempFile("bundle", ".tmp", libraryDir)
-              zip.getInputStream(zip.getEntry(name)).use { input -> temp.outputStream().use { input.copyTo(it) } }
-              temp to name.substringAfterLast('/')
+              extracted += temp to name.substringAfterLast('/')
+              zip.getInputStream(zip.getEntry(name)).use { input -> budget.limit(temp.outputStream()).use { input.copyTo(it) } }
             }
-          extracted to 0
-        } else {
-          emptyList<Pair<File, String>>() to names.count(::isImage)
+            0
+          } else {
+            names.count(::isImage)
+          }
         }
+      } catch (e: Exception) {
+        // Leave nothing half-unpacked behind.
+        extracted.forEach { it.first.delete() }
+        throw e
       }
     if (isEpub) return listOf(moveInto(file, libraryDir, "$title.epub"))
-    if (bundled.isNotEmpty()) return importBundle(bundled, libraryDir)
+    if (extracted.isNotEmpty()) return importBundle(extracted, libraryDir, budget)
     if (images == 0) throw IOException("\"$title\" contains no comic pages")
     return listOf(moveInto(file, libraryDir, "$title.cbz"))
   }
 
-  private fun importRar(file: File, libraryDir: File, title: String, depth: Int): List<File> {
+  private fun importRar(file: File, libraryDir: File, title: String, depth: Int, budget: Budget): List<File> {
     val bundled = ArrayList<Pair<File, String>>()
     var target: File? = null
     try {
       Archive(file).use { rar ->
         val headers = rar.fileHeaders.filter { !it.isDirectory }
+        budget.checkEntries(headers.size)
         val bundledHeaders = headers.filter { isComicFile(it.fileName.replace('\\', '/')) }
         if (bundledHeaders.isNotEmpty() && depth == 0) {
           for (header in bundledHeaders) {
             val temp = File.createTempFile("bundle", ".tmp", libraryDir)
-            temp.outputStream().use { rar.extractFile(header, it) }
             bundled.add(temp to header.fileName.replace('\\', '/').substringAfterLast('/'))
+            budget.limit(temp.outputStream()).use { rar.extractFile(header, it) }
           }
         } else {
           val pages = headers.filter { isImage(it.fileName.replace('\\', '/')) }
@@ -112,7 +171,10 @@ object Importer {
               if (name.split('/').any { it == ".." }) name = name.substringAfterLast('/')
               if (!used.add(name)) continue
               zip.putNextEntry(ZipEntry(name))
-              rar.extractFile(header, zip)
+              // Each page counts against the ceilings; closing the limiter must not close the zip.
+              val page = budget.limit(object : FilterOutputStream(zip) { override fun close() = Unit })
+              rar.extractFile(header, page)
+              page.flush()
               zip.closeEntry()
             }
           }
@@ -125,17 +187,19 @@ object Importer {
       // junrar reports unsupported archives (notably RAR5) with its own exception types.
       throw IOException("Could not read RAR archive \"$title\" (${e.javaClass.simpleName}); RAR5 is not supported", e)
     }
-    return target?.let(::listOf) ?: importBundle(bundled, libraryDir)
+    return target?.let(::listOf) ?: importBundle(bundled, libraryDir, budget)
   }
 
-  private fun importBundle(parts: List<Pair<File, String>>, libraryDir: File): List<File> {
+  private fun importBundle(parts: List<Pair<File, String>>, libraryDir: File, budget: Budget): List<File> {
     val results = ArrayList<File>()
     var firstError: IOException? = null
     for ((temp, name) in parts) {
       try {
-        results += import(temp, libraryDir, name, depth = 1)
+        results += import(temp, libraryDir, name, depth = 1, budget = budget)
       } catch (e: IOException) {
         if (firstError == null) firstError = e
+      } finally {
+        temp.delete()
       }
     }
     if (results.isEmpty()) throw firstError ?: IOException("Archive contained no readable comics")

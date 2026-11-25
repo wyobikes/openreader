@@ -19,7 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -57,6 +58,7 @@ import dev.local.androidreader.source.KomgaConfig
 import dev.local.androidreader.source.OpdsConfig
 import dev.local.androidreader.source.RemoteFile
 import dev.local.androidreader.source.ServerCheck
+import dev.local.androidreader.source.ServerOrigin
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import dev.local.androidreader.ui.theme.ReaderTheme
 import kotlinx.coroutines.flow.drop
@@ -124,7 +126,7 @@ fun BrowseContent(
               entry.thumbnailUrl,
               entry.title,
               Modifier.size(width = 48.dp, height = 68.dp).clip(RoundedCornerShape(4.dp)),
-              state.thumbnailHeaders,
+              if (ServerOrigin.sameServer(state.serverUrl, entry.thumbnailUrl)) state.thumbnailHeaders else emptyMap(),
             )
           },
           trailingContent = if (entry.isFolder) ({ Text("›", style = MaterialTheme.typography.titleLarge) }) else null,
@@ -236,8 +238,10 @@ internal fun AddCatalogDialog(
   var url by rememberSaveable { mutableStateOf("") }
   var username by rememberSaveable { mutableStateOf("") }
   // Secret fields keep their text in a state object, as the secure text field requires.
-  val passwordState = rememberTextFieldState()
-  val apiKeyState = rememberTextFieldState()
+  // Plain `remember`, not the saveable kind: what is typed here must not be written to disk when
+  // Android saves the screen's state. The cost is that rotating the phone clears these two fields.
+  val passwordState = remember { TextFieldState() }
+  val apiKeyState = remember { TextFieldState() }
   val password = passwordState.text.toString()
   val apiKey = apiKeyState.text.toString()
   // Changing either secret invalidates a passed connection test, like any other detail.
@@ -298,6 +302,17 @@ internal fun AddCatalogDialog(
         OutlinedSecureTextField(state = passwordState, label = { Text(if (komga) "Password" else "Password (optional)") })
         if (komga) {
           OutlinedSecureTextField(state = apiKeyState, label = { Text("API key (instead of email and password)") })
+        }
+
+        // A sign-in sent over plain http can be read by anyone on the same network.
+        val sendsSignIn = username.isNotBlank() || password.isNotEmpty() || (komga && apiKey.isNotBlank())
+        if (trimmedUrl.startsWith("http://", ignoreCase = true) && sendsSignIn) {
+          Text(
+            "This address starts with http, so your sign-in will be sent without encryption. Anyone on the same network " +
+              "could read it. Use an https address if your server has one.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+          )
         }
 
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -20,6 +20,7 @@ import androidx.work.workDataOf
 import dev.local.androidreader.ReaderApp
 import dev.local.androidreader.epub.PdfToEpub
 import dev.local.androidreader.library.Importer
+import dev.local.androidreader.library.SecretSealer
 import dev.local.androidreader.source.OpdsSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -54,7 +55,7 @@ data class DownloadItem(
 }
 
 /** The download queue. WorkManager persists it, so it survives the app being closed. */
-class DownloadQueue(context: Context) {
+class DownloadQueue(context: Context, private val sealer: SecretSealer) {
   private val workManager = WorkManager.getInstance(context)
 
   val items: Flow<List<DownloadItem>> =
@@ -68,12 +69,13 @@ class DownloadQueue(context: Context) {
     sourceId: String? = null,
     headers: Map<String, String> = emptyMap(),
   ) {
-    // Request headers (cookies, referrer) from the in-app browser travel as "Name: value" lines.
-    val headerLines = headers.filterValues { it.isNotBlank() }.map { (k, v) -> "$k: $v" }.toTypedArray()
+    // Android writes a queued job's data to disk, so the browser's headers (which can include
+    // cookies) are encrypted first.
+    val packedHeaders = DownloadHeaders.pack(headers, sealer)
     val request =
       OneTimeWorkRequestBuilder<DownloadWorker>()
         .setInputData(
-          workDataOf(KEY_URL to url, KEY_NAME to fileName, KEY_TITLE to title, KEY_SOURCE to sourceId, KEY_HEADERS to headerLines)
+          workDataOf(KEY_URL to url, KEY_NAME to fileName, KEY_TITLE to title, KEY_SOURCE to sourceId, KEY_HEADERS to packedHeaders)
         )
         .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
         .addTag(TAG)
@@ -139,12 +141,11 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
     // background and rely on resume + retry.
     runCatching { setForeground(foregroundInfo(title, 0, 0)) }
 
-    // Sign-in details for the catalogue the file came from, plus anything the browser passed along.
+    // The catalogue's sign-in, if the file is on the catalogue's own server (a catalogue can link
+    // to files hosted anywhere), plus anything the browser passed along.
     val headers =
-      app.sources().firstOrNull { it.id == sourceId }?.requestHeaders.orEmpty() +
-        inputData.getNullableStringArray(DownloadQueue.KEY_HEADERS).orEmpty().filterNotNull().associate {
-          it.substringBefore(": ") to it.substringAfter(": ")
-        }
+      app.sources().firstOrNull { it.id == sourceId }?.headersFor(url).orEmpty() +
+        DownloadHeaders.unpack(inputData.getString(DownloadQueue.KEY_HEADERS), SecretSealer(app.secrets))
 
     // A stable temp name per URL lets a retried job resume the same partial file.
     val temp = File(File(applicationContext.cacheDir, "downloads").apply { mkdirs() }, sha1(url))

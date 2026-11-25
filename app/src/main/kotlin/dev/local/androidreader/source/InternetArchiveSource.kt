@@ -16,7 +16,8 @@ import okhttp3.OkHttpClient
  */
 class InternetArchiveSource(
   private val client: OkHttpClient,
-  private val baseUrl: String = "https://archive.org",
+  // Not the interface's `baseUrl`: this source has no sign-in, so there is no server to guard.
+  private val siteUrl: String = "https://archive.org",
 ) : ComicSource {
   override val id = ID
   override val name = "Internet Archive"
@@ -25,7 +26,7 @@ class InternetArchiveSource(
   override suspend fun browse(location: String?): CatalogPage {
     val (query, page) = decodeLocation(location)
     val url =
-      "$baseUrl/advancedsearch.php".toHttpUrl().newBuilder()
+      "$siteUrl/advancedsearch.php".toHttpUrl().newBuilder()
         .addQueryParameter("q", buildQuery(query))
         .apply { listOf("identifier", "title", "creator", "year").forEach { addQueryParameter("fl[]", it) } }
         .addQueryParameter("sort[]", "downloads desc")
@@ -33,13 +34,13 @@ class InternetArchiveSource(
         .addQueryParameter("page", page.toString())
         .addQueryParameter("output", "json")
         .build()
-    return parseSearch(client.getText(url.toString()), query, page, baseUrl)
+    return parseSearch(client.getText(url.toString()), query, page, siteUrl)
   }
 
   override suspend fun search(query: String): CatalogPage = browse(encodeLocation(query.trim(), 1))
 
   override suspend fun files(entry: CatalogEntry): List<RemoteFile> =
-    parseFiles(entry.id, client.getText("$baseUrl/metadata/${entry.id}"), baseUrl)
+    parseFiles(entry.id, client.getText("$siteUrl/metadata/${entry.id}"), siteUrl)
 
   companion object {
     const val ID = "internet-archive"

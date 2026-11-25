@@ -40,6 +40,8 @@ data class BrowseUiState(
   val serverCheck: ServerCheck? = null,
   /** Sign-in headers the selected source needs for its thumbnails. */
   val thumbnailHeaders: Map<String, String> = emptyMap(),
+  /** The selected source's own server; covers hosted anywhere else are fetched without the sign-in. */
+  val serverUrl: String? = null,
 )
 
 class BrowseViewModel(application: Application) : AndroidViewModel(application) {
@@ -65,6 +67,7 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
             sources = sources.map { SourceInfo(it.id, it.name, it.id.startsWith("opds:") || it.id.startsWith("komga:")) },
             selected = index,
             thumbnailHeaders = sources[index].requestHeaders,
+            serverUrl = sources[index].baseUrl,
           )
         }
         if (selectedId == null || sources[index].id != selectedId) loadRoot()
@@ -74,7 +77,13 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
 
   fun selectSource(index: Int) {
     if (index == _state.value.selected) return
-    _state.update { it.copy(selected = index, thumbnailHeaders = sources.getOrNull(index)?.requestHeaders.orEmpty()) }
+    _state.update {
+      it.copy(
+        selected = index,
+        thumbnailHeaders = sources.getOrNull(index)?.requestHeaders.orEmpty(),
+        serverUrl = sources.getOrNull(index)?.baseUrl,
+      )
+    }
     loadRoot()
   }
 
@@ -179,6 +188,7 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
         sources = sources.map { SourceInfo(it.id, it.name, it.id.startsWith("opds:") || it.id.startsWith("komga:")) },
         selected = index,
         thumbnailHeaders = sources[index].requestHeaders,
+            serverUrl = sources[index].baseUrl,
       )
     }
     loadRoot()
@@ -193,6 +203,18 @@ class BrowseViewModel(application: Application) : AndroidViewModel(application) 
   private fun load(replace: Boolean, request: suspend (ComicSource) -> CatalogPage) {
     val source = current ?: return
     loadJob?.cancel()
+    if (source.id in app.library.lostSignIns) {
+      _state.update {
+        it.copy(
+          loading = false,
+          entries = emptyList(),
+          nextLocation = null,
+          canGoUp = false,
+          error = "The saved sign-in for this server could not be read on this phone. Remove the server and add it again.",
+        )
+      }
+      return
+    }
     _state.update {
       it.copy(loading = true, error = null, entries = if (replace) emptyList() else it.entries, canGoUp = parents.isNotEmpty())
     }

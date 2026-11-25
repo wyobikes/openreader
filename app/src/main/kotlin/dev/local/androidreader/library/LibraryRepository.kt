@@ -59,12 +59,33 @@ private data class Saved(
   val theme: ThemeMode = ThemeMode.SYSTEM,
   val convertPdfToEpub: Boolean = false,
   val bookTextZoom: Int = 100,
+  /**
+   * How passwords and API keys are written in this file: 0 is the original form, as plain text;
+   * 1 means each one is a sealed token (see [SecretSealer]).
+   */
+  val secretsFormat: Int = 0,
 )
 
 /** The comics folder plus a small JSON file holding reading positions and catalogue settings. */
-class LibraryRepository(val dir: File, private val stateFile: File) {
+class LibraryRepository(
+  val dir: File,
+  private val stateFile: File,
+  /** Encrypts saved sign-ins. Without one they are stored as plain text, as tests do. */
+  box: SecretBox? = null,
+) {
   private val json = Json { ignoreUnknownKeys = true }
+  private val sealer = SecretSealer(box)
+  private val lost = HashSet<String>()
+
+  // In memory, `saved` always holds sign-ins as plain text; they are sealed only on the way to disk.
   private var saved: Saved = load()
+
+  /**
+   * Servers whose saved sign-in could not be decrypted, which happens if the phone's keystore
+   * has lost the key. They keep their address and name, and need the sign-in entered again.
+   */
+  val lostSignIns: Set<String>
+    get() = synchronized(this) { lost.toSet() }
 
   private val _comics = MutableStateFlow<List<Comic>>(emptyList())
   val comics: StateFlow<List<Comic>> = _comics.asStateFlow()
@@ -103,17 +124,37 @@ class LibraryRepository(val dir: File, private val stateFile: File) {
   val komgaServers: StateFlow<List<KomgaConfig>> = _komga.asStateFlow()
 
   init {
+    // A file from before sign-ins were encrypted is rewritten once, sealed. Sealing cannot lose
+    // a sign-in, so this is safe even on a phone whose keystore does not work.
+    val hasSignIns = saved.opds.any { it.password.isNotEmpty() } || saved.komga.any { it.password.isNotEmpty() || it.apiKey.isNotEmpty() }
+    if (saved.secretsFormat == 0 && hasSignIns) persist(saved)
     refresh()
   }
 
-  private fun load(): Saved =
-    runCatching { json.decodeFromString(Saved.serializer(), stateFile.readText()) }.getOrDefault(Saved())
+  private fun load(): Saved {
+    val stored = runCatching { json.decodeFromString(Saved.serializer(), stateFile.readText()) }.getOrDefault(Saved())
+    // The original format holds sign-ins as plain text; there is nothing to open.
+    if (stored.secretsFormat == 0) return stored
+    fun open(serverId: String, token: String): String = sealer.open(token) ?: "".also { lost += serverId }
+    return stored.copy(
+      opds = stored.opds.map { it.copy(password = open(it.id, it.password)) },
+      komga = stored.komga.map { it.copy(password = open(it.id, it.password), apiKey = open(it.id, it.apiKey)) },
+    )
+  }
+
+  /** The form written to disk: every sign-in sealed. */
+  private fun sealed(plain: Saved): Saved =
+    plain.copy(
+      opds = plain.opds.map { it.copy(password = sealer.seal(it.password)) },
+      komga = plain.komga.map { it.copy(password = sealer.seal(it.password), apiKey = sealer.seal(it.apiKey)) },
+      secretsFormat = 1,
+    )
 
   @Synchronized
   private fun persist(next: Saved) {
     saved = next
     val temp = File(stateFile.parentFile, stateFile.name + ".tmp")
-    temp.writeText(json.encodeToString(Saved.serializer(), next))
+    temp.writeText(json.encodeToString(Saved.serializer(), sealed(next)))
     if (!temp.renameTo(stateFile)) {
       temp.copyTo(stateFile, overwrite = true)
       temp.delete()
@@ -158,12 +199,14 @@ class LibraryRepository(val dir: File, private val stateFile: File) {
 
   @Synchronized
   fun saveOpds(config: OpdsConfig) {
+    lost -= config.id
     persist(saved.copy(opds = saved.opds.filter { it.url != config.url } + config))
     _opds.value = saved.opds
   }
 
   @Synchronized
   fun saveKomga(config: KomgaConfig) {
+    lost -= config.id
     persist(saved.copy(komga = saved.komga.filter { it.url != config.url } + config))
     _komga.value = saved.komga
   }

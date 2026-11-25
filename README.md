@@ -98,13 +98,38 @@ including the camera cutout, and keeps the screen on.
 **Books.** Tap the right or left side to move a screenful forward or back, and the middle for
 the controls: contents, text size, and previous or next section.
 
-## Privacy
+## Privacy and security
 
-- No accounts, analytics, advertising or tracking of any kind.
-- Server sign-in details are stored on the device without encryption, in the app's private
-  storage. For that reason the app is excluded from cloud backup and device-to-device transfer.
-- Plain `http://` connections are allowed, so that home servers without a certificate work.
-- The ad-blocking list is downloaded from its public source about once a week.
+- **Nothing is reported to anyone.** No accounts, analytics, advertising, crash reporting or
+  tracking of any kind.
+- **Your sign-ins are encrypted on the phone,** with a key held in Android's keystore, which on
+  most phones is dedicated hardware. A copy of the app's data taken off the phone cannot be read
+  without that key. This does not protect against something already running as the app on the
+  phone itself, such as on a rooted device.
+- **A sign-in only ever goes to the server you saved it for.** Covers, downloads and links that a
+  catalogue points to on some other server are fetched without it, and it is dropped if a server
+  redirects elsewhere.
+- **Plain `http://` is allowed,** so that home servers without a certificate work, but anything
+  sent over it can be read by others on the same network. The app warns you before you save a
+  sign-in for an `http://` address. Use `https://` when your server offers it.
+- **No backups.** The app is excluded from cloud backup and device-to-device transfer, so saved
+  sign-ins never leave the phone that way. Reading positions and saved servers therefore do not
+  carry over to a new phone.
+- **Web pages and books are kept away from your files.** Neither the built-in browser nor the
+  book reader can read files on the phone, and books cannot run scripts or reach the network.
+- **Ad blocking is best-effort,** not a privacy guarantee. It stops most advertising and tracking
+  requests; it cannot stop all of them.
+
+The app contacts three outside services on its own, each for a visible reason:
+
+| Service | When | Why |
+|---|---|---|
+| archive.org | When the Internet Archive catalogue is open | Listings and cover images |
+| duckduckgo.com | When the built-in browser opens | Its home page and searches |
+| GitHub | About once a week, when the browser is used | Refreshing the ad-blocking list |
+
+Each of them sees your network address, as any website you visit does. Everything else the app
+connects to is a server or site you chose.
 
 ## Building it yourself
 

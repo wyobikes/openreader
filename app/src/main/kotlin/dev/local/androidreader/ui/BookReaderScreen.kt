@@ -311,19 +311,24 @@ private fun BookPage(
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         settings.javaScriptEnabled = false
         settings.blockNetworkLoads = true
-        settings.allowFileAccess = false
-        settings.allowContentAccess = false
+        settings.denyLocalAccess()
 
         webViewClient =
           object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
               val missing = WebResourceResponse("text/plain", "utf-8", 404, "Not found", emptyMap(), ByteArrayInputStream(ByteArray(0)))
               val path = BookHtml.path(request.url.toString()) ?: return missing
-              val stream = book.open(path) ?: return missing
               val type = book.mediaType(path)
-              if (!BookHtml.isChapterType(type)) return WebResourceResponse(type, null, stream)
-              val styled = stream.use { BookHtml.inject(it.readBytes().toString(Charsets.UTF_8), currentCss) }
-              return WebResourceResponse(type, "utf-8", ByteArrayInputStream(styled.toByteArray()))
+              if (BookHtml.isChapterType(type)) {
+                // Text is styled in memory; a section too large for that is shown as it is.
+                val text = book.readSection(path)
+                if (text != null) {
+                  val styled = BookHtml.inject(text.toString(Charsets.UTF_8), currentCss)
+                  return WebResourceResponse(type, "utf-8", ByteArrayInputStream(styled.toByteArray()))
+                }
+              }
+              val stream = book.open(path) ?: return missing
+              return WebResourceResponse(type, null, stream)
             }
 
             // Links to other parts of the book are followed; links out to the web are ignored.
