@@ -139,6 +139,33 @@ class LibraryTest {
   }
 
   @Test
+  fun itemsSortByFileTypeUntilMovedAndTheMoveIsRemembered() {
+    val dir = tmp.newFolder("lib")
+    val state = File(tmp.root, "library.json")
+    listOf("Issue 1.cbz", "Novel.epub", "Scan.pdf").forEach { File(dir, it).writeBytes(page) }
+
+    val repo = LibraryRepository(dir, state)
+    fun shelves(r: LibraryRepository) = r.comics.value.associate { it.file.name to it.isComic }
+    assertEquals(mapOf("Issue 1.cbz" to true, "Novel.epub" to false, "Scan.pdf" to false), shelves(repo))
+
+    // A comic saved as a PDF goes to Comics; reading progress on it is untouched.
+    val scan = repo.comics.value.first { it.file.name == "Scan.pdf" }
+    repo.updateState(scan.file) { it.copy(lastPage = 7, pageCount = 20, lastOpened = 1) }
+    repo.moveToShelf(scan.file, comics = true)
+    repo.moveToShelf(File(dir, "Issue 1.cbz"), comics = false)
+    assertEquals(mapOf("Issue 1.cbz" to false, "Novel.epub" to false, "Scan.pdf" to true), shelves(repo))
+    assertEquals(7, repo.comics.value.first { it.file.name == "Scan.pdf" }.state.lastPage)
+    assertTrue(scan.file.exists())
+
+    // Survives a restart and a rescan of the folder, and can be moved back.
+    val reopened = LibraryRepository(dir, state)
+    reopened.refresh()
+    assertEquals(mapOf("Issue 1.cbz" to false, "Novel.epub" to false, "Scan.pdf" to true), shelves(reopened))
+    reopened.moveToShelf(scan.file, comics = false)
+    assertEquals(false, shelves(reopened)["Scan.pdf"])
+  }
+
+  @Test
   fun corruptStateFileIsIgnored() {
     val dir = tmp.newFolder("lib")
     val state = File(tmp.root, "library.json").apply { writeText("{not json") }

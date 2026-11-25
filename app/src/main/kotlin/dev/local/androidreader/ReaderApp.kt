@@ -23,7 +23,7 @@ class ReaderApp : Application() {
         val request = chain.request()
         chain.proceed(
           if (request.header("User-Agent") != null) request
-          else request.newBuilder().header("User-Agent", "AndroidReader/1.0").build()
+          else request.newBuilder().header("User-Agent", "OpenReader/1.0").build()
         )
       }
       .build()

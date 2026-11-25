@@ -18,7 +18,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:windowSoftInputMode="adjustResize"
-        android:theme="@style/Theme.AndroidReader">
+        android:theme="@style/Theme.OpenReader">
         <activity
             android:name=".MainActivity"
             android:exported="true">

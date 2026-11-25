@@ -48,6 +48,7 @@ fun LibraryContent(
   onDelete: (Comic) -> Unit,
   modifier: Modifier = Modifier,
   onConvertToEpub: (Comic) -> Unit = {},
+  onMove: (Comic, toComics: Boolean) -> Unit = { _, _ -> },
 ) {
   var pendingDelete by remember { mutableStateOf<Comic?>(null) }
   val books = remember(comics) { comics.filterNot { it.isComic } }
@@ -129,6 +130,14 @@ fun LibraryContent(
       title = { Text(comic.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
       text = {
         Column {
+          TextButton(
+            onClick = {
+              onMove(comic, !comic.isComic)
+              pendingDelete = null
+            }
+          ) {
+            Text(if (comic.isComic) "Move to Books" else "Move to Comics")
+          }
           if (isPdf) {
             TextButton(
               onClick = {
@@ -136,7 +145,7 @@ fun LibraryContent(
                 pendingDelete = null
               }
             ) {
-              Text("Make an EPUB copy")
+              Text("Convert to EPUB")
             }
             Text(
               "Text only: pictures and page layout are not carried over. The PDF is kept.",
